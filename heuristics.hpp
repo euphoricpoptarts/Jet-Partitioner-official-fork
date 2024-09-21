@@ -464,39 +464,46 @@ public:
         }
         ordinal_t perm_length = n;
         //construct mapping using heaviest edges
-        int swap = 1;
         vtx_view_t perm_scratch(Kokkos::ViewAllocateWithoutInitializing("next perm"), n);
         while (perm_length > 0) {
-            //match vertices with heaviest unmatched edge
-            Kokkos::parallel_for("commit matches (part 1)", policy_t(0, perm_length), KOKKOS_LAMBDA(ordinal_t i){
-                ordinal_t u = perm_length == n ? i : vperm(i);
-                ordinal_t v = hn(u);
-                if(v == ORD_MAX) return;
-                int condition = (u < v) ^ swap;
-                //need to enforce an ordering condition to allow hard-stall conditions to be broken
-                if (!condition) {
-                    vcmap(u) = ORD_MAX - 1;
-                }
-            });
-            Kokkos::parallel_for("commit matches (part 2)", policy_t(0, perm_length), KOKKOS_LAMBDA(ordinal_t i){
-                ordinal_t u = perm_length == n ? i : vperm(i);
-                ordinal_t v = hn(u);
-                if(v == ORD_MAX) return;
-                int condition = (u < v) ^ swap;
-                //need to enforce an ordering condition to allow hard-stall conditions to be broken
-                if (condition) {
+            //std::cout << "Remaining vtx: " << perm_length << std::endl;
+            //match vertices with vertex given by hn
+            for(int r = 0; r < 4; r++){
+                // use hash to determine which vertices are active/inactive in each phase
+                // vary the hash with r so that the active/inactive sets change greatly between phases
+                // we want to match as many vertices as possible according to hn to avoid computing new matches
+                // this approach seems to produce higher qualtiy partitions than a maximal independent set induced by hn
+                Kokkos::parallel_for("commit matches (part 1)", policy_t(0, perm_length), KOKKOS_LAMBDA(ordinal_t i){
+                    ordinal_t u = perm_length == n ? i : vperm(i);
+                    ordinal_t v = hn(u);
+                    if(v == ORD_MAX || vcmap(u) != ORD_MAX) return;
+                    hasher_t hash;
+                    bool condition = false;
+                    if(r > 0) condition = (hash(u + r) < hash(v + r));
+                    else condition = (u < v);
+                    // vertices passing condition are active
+                    // vertices failing condition are inactive
+                    // a match can only occur by an active vertex matching an inactive vertex
+                    if (!condition) {
+                        vcmap(u) = ORD_MAX - 1;
+                    }
+                });
+                Kokkos::parallel_for("commit matches (part 2)", policy_t(0, perm_length), KOKKOS_LAMBDA(ordinal_t i){
+                    ordinal_t u = perm_length == n ? i : vperm(i);
+                    ordinal_t v = hn(u);
+                    if(v == ORD_MAX || vcmap(u) != ORD_MAX) return;
                     ordinal_t cv = u < v ? u : v;
                     if (Kokkos::atomic_compare_exchange_strong(&vcmap(v), ORD_MAX - 1, cv)) {
                         vcmap(u) = cv;
                     }
-                }
-            });
-            Kokkos::parallel_for("commit matches (part 3)", policy_t(0, perm_length), KOKKOS_LAMBDA(ordinal_t i){
-                ordinal_t u = perm_length == n ? i : vperm(i);
-                if(vcmap(u) == ORD_MAX - 1){
-                    vcmap(u) = ORD_MAX;
-                }
-            });
+                });
+                Kokkos::parallel_for("commit matches (part 3)", policy_t(0, perm_length), KOKKOS_LAMBDA(ordinal_t i){
+                    ordinal_t u = perm_length == n ? i : vperm(i);
+                    if(vcmap(u) == ORD_MAX - 1){
+                        vcmap(u) = ORD_MAX;
+                    }
+                });
+            }
 
             // find new matches for unmatched vertices
             if(uniform_weights){
@@ -528,7 +535,6 @@ public:
                     update++;
                 }
             }, perm_length);
-            swap = swap ^ 1;
             vperm = Kokkos::subview(vperm_scratch, std::make_pair((ordinal_t)0, perm_length));
         }
 
