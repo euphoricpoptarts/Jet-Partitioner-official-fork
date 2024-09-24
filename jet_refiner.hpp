@@ -69,11 +69,12 @@ public:
     // need some trickery because make_signed is undefined for floating point types
     using gain_t = typename std::conditional_t<std::is_signed_v<scalar_t>, type_identity<scalar_t>, std::make_signed<scalar_t>>::type;
     using vtx_view_t = Kokkos::View<ordinal_t*, Device>;
-    using vtx_svt = Kokkos::View<ordinal_t, Device>;
+    using vtx_pin_st = Kokkos::View<ordinal_t, Kokkos::SharedHostPinnedSpace>;
     using wgt_view_t = Kokkos::View<scalar_t*, Device>;
     using edge_view_t = Kokkos::View<edge_offset_t*, Device>;
     using gain_vt = Kokkos::View<gain_t*, Device>;
-    using gain_svt = Kokkos::View<gain_t, Device>;
+    using gain_pin_vt = Kokkos::View<gain_t*, Kokkos::SharedHostPinnedSpace>;
+    using gain_pin_st = Kokkos::View<gain_t, Kokkos::SharedHostPinnedSpace>;
     using part_vt = Kokkos::View<part_t*, Device>;
     using part_svt = Kokkos::View<part_t, Device>;
     using edge_subview_t = Kokkos::View<edge_offset_t, Device>;
@@ -124,10 +125,9 @@ struct scratch_mem {
     gain_vt gain1, gain2, gain_persistent, evict_start, evict_end;
     vtx_view_t vtx1, vtx2, zeros1;
     part_vt dest_part, undersized;
-    vtx_svt counter1;
-    gain_svt cut_change1, cut_change2, max_part;
-    gain_vt reduce_locs;
-    typename gain_vt::HostMirror reduce_copy;
+    vtx_pin_st scan_host;
+    gain_pin_st cut_change1, cut_change2, max_part;
+    gain_pin_vt reduce_locs;
     part_svt total_undersized;
 
     scratch_mem(const ordinal_t n, const ordinal_t min_size, const part_t k) {
@@ -141,10 +141,9 @@ struct scratch_mem {
         vtx2 = vtx_view_t(Kokkos::ViewAllocateWithoutInitializing("vtx scratch 2"), std::max(n, min_size));
         dest_part = part_vt(Kokkos::ViewAllocateWithoutInitializing("destination scratch"), n);
         zeros1 = vtx_view_t("zeros 1", n);
-        counter1 = vtx_svt("counter 1");
+        scan_host = vtx_pin_st("scan host");
         total_undersized = part_svt("total undersized");
-        reduce_locs = gain_vt("reduce to here", 3);
-        reduce_copy = Kokkos::create_mirror_view(reduce_locs);
+        reduce_locs = gain_pin_vt("reduce to here", 3);
         cut_change1 = Kokkos::subview(reduce_locs, 0);
         cut_change2 = Kokkos::subview(reduce_locs, 1);
         max_part = Kokkos::subview(reduce_locs, 2);
@@ -263,7 +262,9 @@ vtx_view_t jet_lp(const problem& prob, const part_vt& part, const conn_data& cda
             pregain(i) = GAIN_MIN;
             lock_bit(i) = 0;
         }
-    }, num_pos);
+    }, scratch.scan_host);
+    exec_space().fence();
+    num_pos = scratch.scan_host();
     //truncate scratch views by num_pos
     vtx_view_t pos_moves = Kokkos::subview(swap_scratch, std::make_pair(static_cast<ordinal_t>(0), num_pos));
     //in this kernel every potential move from the previous filters
@@ -313,7 +314,9 @@ vtx_view_t jet_lp(const problem& prob, const part_vt& part, const conn_data& cda
             }
             update++;
         }
-    }, num_pos);
+    }, scratch.scan_host);
+    exec_space().fence();
+    num_pos = scratch.scan_host();
     pos_moves = Kokkos::subview(swaps2, std::make_pair(static_cast<ordinal_t>(0), num_pos));
     return pos_moves;
 }
@@ -412,15 +415,20 @@ vtx_view_t rebalance_strong(const problem& prob, const part_vt& part, const conn
     });
     vtx_view_t bucket_offsets = bucket_sizes;
     //scan bucket sizes to compute offsets
+    vtx_pin_st scan_host = scratch.scan_host;
     if(t_minibuckets < 10000 && !is_host_space){
         Kokkos::parallel_for("scan scores", team_policy_t(1, 1024), KOKKOS_LAMBDA(const member& t){
             //this scan is small so do it within a team instead of an entire grid to save kernel launch time
+            ordinal_t total = 0;
             Kokkos::parallel_scan(Kokkos::TeamThreadRange(t, 0, t_minibuckets + 2), [&] (const ordinal_t i, ordinal_t& update, const bool final) {
                 ordinal_t curr = bucket_sizes(i);
                 if(final){
                     bucket_offsets(i) = update;
                 }
                 update += curr;
+            }, total);
+            Kokkos::single(Kokkos::PerTeam(t), [=]{
+                scan_host() = total;
             });
         });
     } else {
@@ -430,7 +438,7 @@ vtx_view_t rebalance_strong(const problem& prob, const part_vt& part, const conn
                 bucket_offsets(i) = update;
             }
             update += curr;
-        });
+        }, scan_host);
     }
     vtx_view_t least_bad_moves = scratch.vtx1;
     Kokkos::parallel_for("assign move scores part2", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i){
@@ -443,9 +451,8 @@ vtx_view_t rebalance_strong(const problem& prob, const part_vt& part, const conn
             }
         }
     });
-    vtx_svt t_vtx_s = Kokkos::subview(bucket_offsets, t_minibuckets);
-    ordinal_t t_vtx = 0;
-    Kokkos::deep_copy(exec_space(), t_vtx, t_vtx_s);
+    exec_space().fence();
+    ordinal_t t_vtx = scan_host();
     least_bad_moves = Kokkos::subview(least_bad_moves, std::make_pair(static_cast<ordinal_t>(0), t_vtx));
     gain_vt balance_scan = Kokkos::subview(scratch.gain1, std::make_pair(static_cast<ordinal_t>(0), t_vtx + 1));
     //scan vwgts of possible moves after gathering into buckets
@@ -499,7 +506,9 @@ vtx_view_t rebalance_strong(const problem& prob, const part_vt& part, const conn
             }
             update++;
         }
-    }, num_moves);
+    }, scratch.scan_host);
+    exec_space().fence();
+    num_moves = scratch.scan_host();
     t_vtx = num_moves;
     vtx_view_t only_moves = Kokkos::subview(moves, std::make_pair(static_cast<ordinal_t>(0), t_vtx));
     part_vt dest_part = scratch.dest_part;
@@ -698,7 +707,9 @@ vtx_view_t rebalance_weak(const problem& prob, const part_vt& part, const conn_d
                 update++;
             }
         }
-    }, num_moves);
+    }, scratch.scan_host);
+    exec_space().fence();
+    num_moves = scratch.scan_host();
     vtx_view_t only_moves = Kokkos::subview(moves, std::make_pair(static_cast<ordinal_t>(0), num_moves));
     return only_moves;
 }
@@ -1004,11 +1015,11 @@ void perform_moves(const problem& prob, part_vt part, const vtx_view_t swaps, co
         gain_update += b_con - p_con;
     }, scratch.cut_change2);
     stat::stash_largest(curr_state.part_sizes, scratch.max_part);
+    exec_space().fence();
     //this whole mess avoids 2 stream-syncs on the 3 reductions in this function
     //by combining their data movements to host together
-    Kokkos::deep_copy(exec_space(), scratch.reduce_copy, scratch.reduce_locs);
-    int64_t cut_change = scratch.reduce_copy(1) + scratch.reduce_copy(0);
-    gain_t max_size = scratch.reduce_copy(2);
+    int64_t cut_change = scratch.cut_change2() + scratch.cut_change1();
+    gain_t max_size = scratch.max_part();
     curr_state.total_imb = max_size > prob.opt ? max_size - prob.opt : 0;
     curr_state.cut -= cut_change;
 } 
