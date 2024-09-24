@@ -72,6 +72,7 @@ public:
     using wgt_view_t = Kokkos::View<scalar_t*, Device>;
     using gain_vt = Kokkos::View<gain_t*, Device>;
     using gain_svt = Kokkos::View<gain_t, Device>;
+    using gain_pin_st = Kokkos::View<gain_t, Kokkos::SharedHostPinnedSpace>;
     using gain_2vt = Kokkos::View<gain_t**, Device>;
     using part_vt = Kokkos::View<part_t*, Device>;
     using policy_t = Kokkos::RangePolicy<exec_space>;
@@ -176,12 +177,12 @@ static gain_t largest_part_size(const gain_vt& ps){
     return result;
 }
 
-static void stash_largest(const gain_vt& ps, gain_svt& result){
+static void stash_largest(const gain_vt& ps, gain_pin_st& result){
     Kokkos::parallel_reduce("get max part size (store in view)", policy_t(0, ps.extent(0)), KOKKOS_LAMBDA(const ordinal_t i, gain_t& update){
         if(ps(i) > update){
             update = ps(i);
         }
-    }, Kokkos::Max<gain_t, typename gain_svt::memory_space>(result));
+    }, Kokkos::Max<gain_t, typename gain_pin_st::memory_space>(result));
 }
 
 static gain_t max_part_cut(const matrix_t g, part_vt part, const part_t k){
