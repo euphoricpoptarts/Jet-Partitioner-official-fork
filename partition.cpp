@@ -42,6 +42,8 @@
 #include "defs.h"
 #include "io.hpp"
 #include <limits>
+#include <vector>
+#include <algorithm>
 
 using namespace jet_partitioner;
 
@@ -121,6 +123,16 @@ void degree_weighting(const matrix_t& g, wgt_view_t vweights){
     });
 }
 
+value_t median(std::vector<value_t>& cuts){
+    std::sort(cuts.begin(), cuts.end());
+    int count = cuts.size();
+    if(count % 2 == 0){
+        return (cuts[count / 2] + cuts[(count / 2) - 1]) / 2;
+    } else {
+        return cuts[count / 2];
+    }
+}
+
 int main(int argc, char **argv) {
 
     if (argc < 3) {
@@ -154,12 +166,16 @@ int main(int argc, char **argv) {
         part_vt best_part;
 
         value_t edgecut_min = std::numeric_limits<value_t>::max();
+        std::vector<value_t> cuts;
+        int64_t avg = 0;
         for (int i=0; i < config.num_iter; i++) {
             Kokkos::fence();
             value_t edgecut = 0;
             ExperimentLoggerUtil<value_t> experiment;
             part_vt part = partition(edgecut, config, g, vweights, uniform_ew,
                 experiment);
+            avg += edgecut;
+            cuts.push_back(edgecut);
 
             if (edgecut < edgecut_min) {
                 edgecut_min = edgecut;
@@ -175,6 +191,8 @@ int main(int argc, char **argv) {
             if(metrics != nullptr) experiment.log(metrics, first, last);
         }
         std::cout << "graph " << filename << ", min edgecut found is " << edgecut_min << std::endl;
+        std::cout << "average edgecut: " << (avg / config.num_iter) << std::endl;
+        std::cout << "median edgecut: " << median(cuts) << std::endl;
 
         if(part_file != nullptr && config.num_iter > 0) write_part(best_part, part_file);
     }
