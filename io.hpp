@@ -95,7 +95,7 @@ void next_line(const char*& str){
 
 bool load_metis_graph(matrix_t& g, bool& uniform_ew, const char *fname) {
     Kokkos::Timer t;
-    std::ifstream infp(fname);
+    std::ifstream infp(fname, std::ios::binary);
     if (!infp.is_open()) {
         std::cerr << "FATAL ERROR: Could not open metis graph file " << fname << std::endl;
         return false;
@@ -108,6 +108,7 @@ bool load_metis_graph(matrix_t& g, bool& uniform_ew, const char *fname) {
     char* s = new char[sz + 1];
     infp.read(s, sz);
     infp.close();
+    std::cout << "Read graph from " << fname << " in " << std::setprecision(3) << t.seconds() << "s" << std::endl;
     //append an endline to end of file in case one doesn't exist
     //needed to prevent parser from overshooting end of buffer
     if(s[sz - 1] != '\n'){
@@ -208,7 +209,7 @@ bool load_metis_graph(matrix_t& g, bool& uniform_ew, const char *fname) {
     }
     graph_t g_graph(entries, row_map);
     g = matrix_t("input graph", n, values, g_graph);
-    std::cout << "Read graph from " << fname << " in " << std::setprecision(3) << t.seconds() << "s" << std::endl;
+    std::cout << "Processed graph at " << fname << " in " << std::setprecision(3) << t.seconds() << "s" << std::endl;
     return true;
 }
 
@@ -243,43 +244,44 @@ part_vt load_part(ordinal_t n, const char *fname){
 //used to control for coarsening when experimenting with refinement
 std::list<typename contracter<matrix_t>::coarse_level_triple> load_coarse(){
     using coarse_level_triple = typename contracter<matrix_t>::coarse_level_triple;
+    std::list<coarse_level_triple> levels;
+    std::list<coarse_level_triple> error_levels;
     FILE* cgfp = fopen("coarse_graphs.out", "r");
     int size = 0;
-    fread(&size, sizeof(int), 1, cgfp);
+    if(fread(&size, sizeof(int), 1, cgfp) != 1) return error_levels;
     std::cout << "Importing " << size << " coarsened graphs" << std::endl;
-    std::list<coarse_level_triple> levels;
     ordinal_t prev_n = 0;
     for(int i = 0; i < size; i++){
         coarse_level_triple level;
         level.level = i + 1;
         ordinal_t N = 0;
-        fread(&N, sizeof(ordinal_t), 1, cgfp);
+        if(fread(&N, sizeof(ordinal_t), 1, cgfp) != 1)  return error_levels;
         edge_offset_t M = 0;
-        fread(&M, sizeof(edge_offset_t), 1, cgfp);
+        if(fread(&M, sizeof(edge_offset_t), 1, cgfp) != 1) return error_levels;
         edge_view_t rows("rows", N + 1);
         auto rows_m = Kokkos::create_mirror_view(rows);
-        fread(rows_m.data(), sizeof(edge_offset_t), N + 1, cgfp);
+        if(fread(rows_m.data(), sizeof(edge_offset_t), N + 1, cgfp) != static_cast<size_t>(N + 1)) return error_levels;
         Kokkos::deep_copy(rows, rows_m);
         vtx_view_t entries("entries", M);
         auto entries_m = Kokkos::create_mirror_view(entries);
-        fread(entries_m.data(), sizeof(ordinal_t), M, cgfp);
+        if(fread(entries_m.data(), sizeof(ordinal_t), M, cgfp) != static_cast<size_t>(M)) return error_levels;
         Kokkos::deep_copy(entries, entries_m);
         wgt_view_t values("values", M);
         auto values_m = Kokkos::create_mirror_view(values);
-        fread(values_m.data(), sizeof(value_t), M, cgfp);
+        if(fread(values_m.data(), sizeof(value_t), M, cgfp) != static_cast<size_t>(M))  return error_levels;
         Kokkos::deep_copy(values, values_m);
         graph_t graph(entries, rows);
         matrix_t g("g", N, values, graph);
         level.mtx = g;
         wgt_view_t vtx_wgts("vtx wgts", N);
         auto vtx_wgts_m = Kokkos::create_mirror_view(vtx_wgts);
-        fread(vtx_wgts_m.data(), sizeof(value_t), N, cgfp);
+        if(fread(vtx_wgts_m.data(), sizeof(value_t), N, cgfp) != static_cast<size_t>(N)) return error_levels;
         Kokkos::deep_copy(vtx_wgts, vtx_wgts_m);
         level.vtx_w = vtx_wgts;
         if(level.level > 1){
             vtx_view_t i_entries("entries", prev_n);
             auto i_entries_m = Kokkos::create_mirror_view(i_entries);
-            fread(i_entries_m.data(), sizeof(ordinal_t), prev_n, cgfp);
+            if(fread(i_entries_m.data(), sizeof(ordinal_t), prev_n, cgfp) != static_cast<size_t>(prev_n)) return error_levels;
             Kokkos::deep_copy(i_entries, i_entries_m);
             typename contracter<matrix_t>::coarse_map i_g;
             i_g.coarse_vtx = N;
@@ -338,7 +340,7 @@ part_vt load_coarse_part(ordinal_t n){
     FILE* cgfp = fopen("coarse_part.out", "r");
     part_vt part("part", n);
     auto part_m = Kokkos::create_mirror_view(part);
-    fread(part_m.data(), sizeof(part_t), n, cgfp);
+    if(fread(part_m.data(), sizeof(part_t), n, cgfp) != static_cast<size_t>(n)) return part;
     Kokkos::deep_copy(part, part_m);
     fclose(cgfp);
     return part;
