@@ -77,6 +77,7 @@ public:
     using gain_pin_st = Kokkos::View<gain_t, Kokkos::SharedHostPinnedSpace>;
     using part_vt = Kokkos::View<part_t*, Device>;
     using part_svt = Kokkos::View<part_t, Device>;
+    using gain_svt = Kokkos::View<gain_t, Device>;
     using edge_subview_t = Kokkos::View<edge_offset_t, Device>;
     using policy_t = Kokkos::RangePolicy<exec_space>;
     using team_policy_t = Kokkos::TeamPolicy<exec_space>;
@@ -122,13 +123,14 @@ struct conn_data {
 
 //this struct contains all the scratch memory used by the refinement iterations
 struct scratch_mem {
-    gain_vt gain1, gain2, gain_persistent, evict_start, evict_end;
+    gain_vt gain1, gain2, gain_persistent, evict_start, evict_end, evict_fix, evict_diff;
     vtx_view_t vtx1, vtx2, zeros1;
     part_vt dest_part, undersized;
     vtx_pin_st scan_host;
     gain_pin_st cut_change1, cut_change2, max_part;
     gain_pin_vt reduce_locs;
     part_svt total_undersized;
+    gain_svt max_vwgt;
 
     scratch_mem(const ordinal_t n, const ordinal_t min_size, const part_t k) {
         gain1 = gain_vt(Kokkos::ViewAllocateWithoutInitializing("gain scratch 1"), std::max(n, min_size));
@@ -136,6 +138,7 @@ struct scratch_mem {
         gain_persistent = gain_vt(Kokkos::ViewAllocateWithoutInitializing("gain persistent"), n);
         evict_start = gain_vt("evict start", k);
         evict_end = gain_vt("evict end", k);
+        evict_fix = gain_vt("evict fix", k);
         undersized = part_vt("undersized parts", k);
         vtx1 = vtx_view_t(Kokkos::ViewAllocateWithoutInitializing("vtx scratch 1"), n);
         vtx2 = vtx_view_t(Kokkos::ViewAllocateWithoutInitializing("vtx scratch 2"), std::max(n, min_size));
@@ -143,6 +146,7 @@ struct scratch_mem {
         zeros1 = vtx_view_t("zeros 1", n);
         scan_host = vtx_pin_st("scan host");
         total_undersized = part_svt("total undersized");
+        max_vwgt = gain_svt("max vwgt allowed");
         reduce_locs = gain_pin_vt("reduce to here", 3);
         cut_change1 = Kokkos::subview(reduce_locs, 0);
         cut_change2 = Kokkos::subview(reduce_locs, 1);
@@ -376,12 +380,22 @@ vtx_view_t rebalance_strong(const problem& prob, const part_vt& part, const conn
     Kokkos::deep_copy(exec_space(), bucket_sizes, 0);
     //atomically count vertices in each gain bucket
     gain_t size_max = prob.size_max;
-    gain_t max_dest = std::min(opt_size + 1, prob.size_max);
+    gain_t max_dest = std::max(opt_size + 1, static_cast<gain_t>(prob.size_max * 0.99));
     gain_vt save_atomic = scratch.gain1;
     gain_vt bid = scratch.gain2;
+    gain_svt max_vwgt = scratch.max_vwgt;
+    Kokkos::parallel_reduce("find max size", policy_t(0, k), KOKKOS_LAMBDA(const part_t p, gain_t& update){
+        gain_t size = part_sizes(p);
+        if(size < max_dest){
+            gain_t cap = max_dest - size;
+            if(cap > update){
+                update = cap;
+            }
+        }
+    }, Kokkos::Max<gain_t, mem_space>(max_vwgt));
     Kokkos::parallel_for("assign move scores part1", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i){
         part_t p = part(i);
-        if(part_sizes(p) > size_max){
+        if(part_sizes(p) > size_max && vtx_w(i) < max_vwgt()){
             uint64_t tk = 0;
             uint64_t tg = 0;
             edge_offset_t start = cdata.conn_offsets(i);
@@ -402,7 +416,7 @@ vtx_view_t rebalance_strong(const problem& prob, const part_vt& part, const conn
             }
             if(tk == 0) tk = 1;
             gain_t gain = (tg / tk) - p_gain;
-            ordinal_t gain_type = gain_bucket(gain, vtx_w(i));
+            ordinal_t gain_type = gain_bucket(gain, Kokkos::min(vtx_w(i), part_sizes(p) - size_max));
             //add to count of appropriate bucket
             if(gain_type < max_buckets && vtx_w(i) < 2*(part_sizes(p) - opt_size)){
                 ordinal_t g_id = (max_buckets*p + gain_type) * sections + (i % sections) + 1;
@@ -443,7 +457,7 @@ vtx_view_t rebalance_strong(const problem& prob, const part_vt& part, const conn
     vtx_view_t least_bad_moves = scratch.vtx1;
     Kokkos::parallel_for("assign move scores part2", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i){
         part_t p = part(i);
-        if(part_sizes(p) > size_max){
+        if(part_sizes(p) > size_max && vtx_w(i) < max_vwgt()){
             ordinal_t insert = save_atomic(i);
             if(insert > -1){
                 insert += bucket_offsets(bid(i));
@@ -532,42 +546,37 @@ vtx_view_t rebalance_strong(const problem& prob, const part_vt& part, const conn
                 gain_t select = 0;
                 if(max_dest > part_sizes(p)){
                     select = max_dest - part_sizes(p);
-                }
-                ordinal_t start = evict_start(p);
-                ordinal_t end = t_vtx;
-                gain_t find = balance_scan(start) + select;
-                ordinal_t mid = (start + end) / 2;
-                //binary search to find eviction cutoffs for each k
-                while(start + 1 < end){
-                    if(balance_scan(mid) >= find){
-                        end = mid;
-                    } else {
-                        start = mid;
-                    }
-                    mid = (start + end) / 2;
-                }
-                if(abs(balance_scan(end) - find) < abs(balance_scan(start) - find)){
-                    evict_end(p) = end;
+                    evict_end(p) = evict_start(p) + select;
                 } else {
-                    evict_end(p) = start;
+                    evict_end(p) = evict_start(p);
                 }
-                if(p + 1 < k){
-                    evict_start(p+1) = evict_end(p);
-                }
+                if(p + 1 < k) evict_start(p + 1) = evict_end(p);
             }
         }
     });
     Kokkos::parallel_for("select destination parts (rs)", policy_t(0, t_vtx), KOKKOS_LAMBDA(const ordinal_t i){
         int p = 0;
         //find chunk that contains i
-        while(p < k && evict_start(p) <= i){
+        while(p < k && evict_start(p) <= balance_scan(i)){
             p++;
         }
         p--;
-        if(i < evict_end(p)){
+        if((balance_scan(i+1) + balance_scan(i))/2 <= evict_end(p)){
             dest_part(unassigned(i)) = p;
         } else {
-            dest_part(unassigned(i)) = part(unassigned(i));
+            //printf("Vtx %i (size %i); cap: %i\n", unassigned(i), vtx_w(unassigned(i)), evict_end(p)-evict_start(p));
+            p = -1;
+            gain_t m = 0;
+            for(part_t x = 0; x < k; x++){
+                if(part_sizes(x) < max_dest){
+                    gain_t cap = max_dest - part_sizes(x);
+                    if(cap > m){
+                        m = cap;
+                        p = x;
+                    }
+                }
+            }
+            dest_part(unassigned(i)) = p;
         }
     });
     return only_moves;
