@@ -88,6 +88,7 @@ public:
     static constexpr bool is_host_space = std::is_same<typename exec_space::memory_space, typename Kokkos::DefaultHostExecutionSpace::memory_space>::value;
     static constexpr part_t NULL_PART = -1;
     static constexpr part_t HASH_RECLAIM = -2;
+    static constexpr part_t NO_MOVE = -3;
 
     static const ordinal_t max_sections = 128;
     static const int max_buckets = 50;
@@ -216,7 +217,7 @@ vtx_view_t jet_lp(const problem& prob, const part_vt& part, const conn_data& cda
             return;
         }
         part_t p = part(i);
-        best = p;
+        best = NO_MOVE;
         gain_t b_conn = 0;
         gain_t p_conn = 0;
         edge_offset_t start = conn_offsets(i);
@@ -233,14 +234,14 @@ vtx_view_t jet_lp(const problem& prob, const part_vt& part, const conn_data& cda
             }
         }
         save_gains(i) = 0;
-        if(best != p){
+        if(best != NO_MOVE){
             // vertices must pass this filter in order to be considered further
             // b_conn >= p_conn may seem redundant but it is important
             // to address an edge case where floor(filter_ratio*p_conn) rounds to zero
             if(b_conn >= p_conn || ((p_conn - b_conn) < floor(filter_ratio*p_conn))){
                 save_gains(i) = b_conn - p_conn;
             } else {
-                best = p;
+                best = NO_MOVE;
             }
         }
         cdata.dest_cache(i) = best;
@@ -254,9 +255,7 @@ vtx_view_t jet_lp(const problem& prob, const part_vt& part, const conn_data& cda
     //write all unlocked vertices that passed the above filter into an unordered list
     //output count of such vertices into num_pos
     Kokkos::parallel_scan("filter potentially viable moves", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
-        part_t p = part(i);
-        part_t best = dest_part(i);
-        if(p != best && lock_bit(i) == 0){
+        if(dest_part(i) != NO_MOVE && lock_bit(i) == 0){
             if(final){
                 swap_scratch(update) = i;
                 pregain(i) = save_gains(i);
