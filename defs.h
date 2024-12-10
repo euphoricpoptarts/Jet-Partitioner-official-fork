@@ -53,12 +53,6 @@ typedef int32_t ordinal_t;
 typedef int32_t edge_offset_t;
 #endif
 typedef edge_offset_t value_t;
-struct config_t {
-    int coarsening_alg;
-    int num_iter;
-    double max_imb_ratio;
-    int num_parts;
-};
 
 #if defined(SERIAL)
 using Device = Kokkos::Serial;
@@ -69,8 +63,8 @@ using Device = Kokkos::DefaultExecutionSpace;
 #endif
 using matrix_t = typename KokkosSparse::CrsMatrix<value_t, ordinal_t, Device, void, edge_offset_t>;
 using host_matrix_t = typename KokkosSparse::CrsMatrix<value_t, ordinal_t, Kokkos::DefaultHostExecutionSpace, void, edge_offset_t>;
+using serial_matrix_t = typename KokkosSparse::CrsMatrix<value_t, ordinal_t, Kokkos::Serial, void, edge_offset_t>;
 using graph_t = typename matrix_t::staticcrsgraph_type;
-using host_graph_t = typename host_matrix_t::staticcrsgraph_type;
 
 using host_policy = Kokkos::RangePolicy<Kokkos::DefaultHostExecutionSpace>;
 
@@ -85,6 +79,8 @@ using edge_t = Kokkos::View<edge_offset_t, Device>;
 using vtx_mirror_t = typename vtx_view_t::HostMirror;
 using wgt_view_t = Kokkos::View<value_t*, Device>;
 using wgt_mirror_t = typename wgt_view_t::HostMirror;
+using wgt_host_vt = Kokkos::View<value_t*, Kokkos::DefaultHostExecutionSpace>;
+using wgt_serial_vt = Kokkos::View<value_t*, Kokkos::Serial>;
 using policy = Kokkos::TeamPolicy<typename Device::execution_space>;
 using r_policy = Kokkos::RangePolicy<typename Device::execution_space>;
 using member = typename policy::member_type;

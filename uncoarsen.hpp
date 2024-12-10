@@ -38,6 +38,7 @@
 // ************************************************************************
 #include "jet_refiner.hpp"
 #include "contract.hpp"
+#include "config.h"
 #include <limits>
 #include <cstdlib>
 #include <cmath>
@@ -48,7 +49,7 @@
 #include <Kokkos_Core.hpp>
 #include "KokkosSparse_CrsMatrix.hpp"
 #include "part_stat.hpp"
-#include "io.hpp"
+#include "binary_dump.hpp"
 
 namespace jet_partitioner {
 
@@ -98,15 +99,13 @@ static void project(ordinal_t fine_n, vtx_view_t map, part_vt input, part_vt out
     });
 }
 
-static part_vt multilevel_jet(std::list<clt> cg_list, part_vt coarse_guess, part_t k, const double imb_ratio, rfd_t& rfd, ExperimentLoggerUtil<scalar_t>& experiment, Kokkos::Timer& t){
+static part_vt multilevel_jet(std::list<clt> cg_list, part_vt coarse_guess, const config_t& config, rfd_t& rfd, ExperimentLoggerUtil<scalar_t>& experiment, Kokkos::Timer& t){
+    part_t k = config.num_parts;
     ref_t refiner(cg_list.front().mtx, k);
 
     //this is used for outputting the coarse data for use by another program
     //timing data is reset after dumping for comparison with other program
-    bool is_dumped = true;
-#ifdef EXP
-    is_dumped = false;
-#endif
+    bool is_dumped = !config.dump_coarse;
     while (!cg_list.empty()) {
         clt cg = cg_list.back();
         if(!is_dumped){
@@ -117,15 +116,15 @@ static part_vt multilevel_jet(std::list<clt> cg_list, part_vt coarse_guess, part
             } else {
                 imb = get_max_imb(rfd.part_sizes, k);
             }
-            if(imb <= imb_ratio){
-                dump_coarse_part(coarse_guess);
-                dump_coarse(cg_list);
+            if(imb <= config.max_imb_ratio){
+                binary_dump<matrix_t, part_t>::dump_coarse_part(coarse_guess);
+                binary_dump<matrix_t, part_t>::dump_coarse(cg_list);
                 is_dumped = true;
                 Kokkos::fence();
                 t.reset();
             }
         }
-        refiner.jet_refine(cg.mtx, k, imb_ratio, cg.vtx_w, coarse_guess, cg_list.size() - 1, rfd, experiment);
+        refiner.jet_refine(cg.mtx, config, cg.vtx_w, coarse_guess, cg_list.size() - 1, rfd, experiment);
         cg_list.pop_back();
         if(!cg_list.empty()){
             clt next_cg = cg_list.back();
@@ -139,12 +138,12 @@ static part_vt multilevel_jet(std::list<clt> cg_list, part_vt coarse_guess, part
     return coarse_guess;
 }
 
-static part_vt uncoarsen(std::list<clt> cg_list, part_vt coarsest, part_t k, double imb_ratio
-    , scalar_t& ec, ExperimentLoggerUtil<scalar_t>& experiment) {
+static part_vt uncoarsen(std::list<clt> cg_list, part_vt coarsest, const config_t& config,
+    scalar_t& ec, ExperimentLoggerUtil<scalar_t>& experiment) {
 
     Kokkos::Timer t;
     rfd_t rfd;
-    part_vt res = multilevel_jet(cg_list, coarsest, k, imb_ratio, rfd, experiment, t);
+    part_vt res = multilevel_jet(cg_list, coarsest, config, rfd, experiment, t);
     Kokkos::fence();
     double rtime = t.seconds();
     t.reset();
@@ -153,6 +152,7 @@ static part_vt uncoarsen(std::list<clt> cg_list, part_vt coarsest, part_t k, dou
     typename gain_vt::HostMirror ps_host = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), part_sizes);
     gain_t largest = 0;
     gain_t total = rfd.total_size;
+    part_t k = config.num_parts;
     double opt = stat::optimal_size(total, k);
     gain_t smallest = total;
     for(int p = 0; p < k; p++){

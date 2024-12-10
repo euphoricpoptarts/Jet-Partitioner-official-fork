@@ -45,6 +45,7 @@
 #include "KokkosSparse_CrsMatrix.hpp"
 #include "ExperimentLoggerUtil.hpp"
 #include "part_stat.hpp"
+#include "config.h"
 
 namespace jet_partitioner {
 
@@ -1049,13 +1050,15 @@ conn_data init_conn_data(const conn_data& scratch_cdata, const matrix_t& g, cons
     return cdata;
 }
 
-void jet_refine(const matrix_t g, const part_t k, const double imb_ratio, wgt_view_t vtx_w, part_vt best_part, int level, refine_data& best_state, ExperimentLoggerUtil<scalar_t>& experiment){
+void jet_refine(const matrix_t g, const config_t& config, wgt_view_t vtx_w, part_vt best_part, int level, refine_data& best_state, ExperimentLoggerUtil<scalar_t>& experiment){
     Kokkos::Timer y;
     //contains several scratch views that are reused in each iteration
     //reallocating in each iteration would be expensive (GPU memory is often slow to deallocate)
     scratch_mem& scratch = perm_scratch;
     //initialize metadata if this is first level being refined
     //ie. if this is the coarsest level
+    part_t k = config.num_parts;
+    double imb_ratio = config.max_imb_ratio;
     if(!best_state.init){
         best_state.cut = stat::get_total_cut(g, best_part);
         best_state.part_sizes = stat::get_part_sizes(g, vtx_w, best_part, k);
@@ -1086,12 +1089,7 @@ void jet_refine(const matrix_t g, const part_t k, const double imb_ratio, wgt_vi
     Kokkos::Timer iter_t;
     int balance_counter = 0;
     int lab_counter = 0;
-    double tol = 0.999;
-#ifdef FOUR9
-    tol = 0.9999;
-#elif defined TWO9
-    tol = 0.99;
-#endif
+    double tol = config.refine_tolerance;
     //repeat until 12 phases since a significant
     //improvement in cut or balance
     //this accounts for at least 3 full lp+rebalancing cycles

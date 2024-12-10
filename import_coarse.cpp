@@ -56,14 +56,12 @@ part_vt partition(value_t& edge_cut,
     Kokkos::fence();
     Kokkos::Timer t;
     double start_time = t.seconds();
-    part_t k = config.num_parts;
     double fin_coarsening_time = t.seconds();
-    double imb_ratio = config.max_imb_ratio;
     part_vt coarsest_p = load_coarse_part(cg_list.back().mtx.numRows());
     Kokkos::fence();
     experiment.addMeasurement(Measurement::InitPartition, t.seconds() - fin_coarsening_time);
-    part_vt part = uncoarsener_t::uncoarsen(cg_list, coarsest_p, k, imb_ratio
-        , edge_cut, experiment);
+    part_vt part = uncoarsener_t::uncoarsen(cg_list, coarsest_p, config,
+        edge_cut, experiment);
 
     Kokkos::fence();
     double fin_uncoarsening = t.seconds();

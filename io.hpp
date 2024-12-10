@@ -38,14 +38,13 @@
 // ************************************************************************
 #pragma once
 #include "defs.h"
+#include "config.h"
 #include "contract.hpp"
 #include <sstream>
 #include <string>
 #include <iostream>
 
-namespace jet_partitioner {
-
-bool load_config(config_t& c, const char* config_f) {
+bool load_config(jet_partitioner::config_t& c, const char* config_f) {
 
     std::ifstream f(config_f);
     if (!f.is_open()) {
@@ -242,8 +241,8 @@ part_vt load_part(ordinal_t n, const char *fname){
 
 //loads a sequence of coarse graphs and mappings between each graph from binary file
 //used to control for coarsening when experimenting with refinement
-std::list<typename contracter<matrix_t>::coarse_level_triple> load_coarse(){
-    using coarse_level_triple = typename contracter<matrix_t>::coarse_level_triple;
+std::list<typename jet_partitioner::contracter<matrix_t>::coarse_level_triple> load_coarse(){
+    using coarse_level_triple = typename jet_partitioner::contracter<matrix_t>::coarse_level_triple;
     std::list<coarse_level_triple> levels;
     std::list<coarse_level_triple> error_levels;
     FILE* cgfp = fopen("coarse_graphs.out", "r");
@@ -283,7 +282,7 @@ std::list<typename contracter<matrix_t>::coarse_level_triple> load_coarse(){
             auto i_entries_m = Kokkos::create_mirror_view(i_entries);
             if(fread(i_entries_m.data(), sizeof(ordinal_t), prev_n, cgfp) != static_cast<size_t>(prev_n)) return error_levels;
             Kokkos::deep_copy(i_entries, i_entries_m);
-            typename contracter<matrix_t>::coarse_map i_g;
+            typename jet_partitioner::contracter<matrix_t>::coarse_map i_g;
             i_g.coarse_vtx = N;
             i_g.map = i_entries;
             level.interp_mtx = i_g;
@@ -295,46 +294,6 @@ std::list<typename contracter<matrix_t>::coarse_level_triple> load_coarse(){
     return levels;
 }
 
-//writes a sequence of coarse graphs and mappings between each graph to binary file
-//used to control for coarsening when experimenting with refinement
-void dump_coarse(std::list<typename contracter<matrix_t>::coarse_level_triple> levels){
-    FILE* cgfp = fopen("coarse_graphs.out", "w");
-    int size = levels.size();
-    fwrite(&size, sizeof(int), 1, cgfp);
-    ordinal_t prev_n = 0;
-    for(auto level : levels){
-        matrix_t g = level.mtx;
-        ordinal_t N = g.numRows();
-        edge_offset_t M = g.nnz();
-        auto rows = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g.graph.row_map);
-        auto entries = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g.graph.entries);
-        auto values = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), g.values);
-        auto vtx_wgts = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), level.vtx_w);
-        fwrite(&N, sizeof(ordinal_t), 1, cgfp);
-        fwrite(&M, sizeof(edge_offset_t), 1, cgfp);
-        fwrite(rows.data(), sizeof(edge_offset_t), N+1, cgfp);
-        fwrite(entries.data(), sizeof(ordinal_t), M, cgfp);
-        fwrite(values.data(), sizeof(value_t), M, cgfp);
-        fwrite(vtx_wgts.data(), sizeof(value_t), N, cgfp);
-        if(level.level > 1){
-            typename contracter<matrix_t>::coarse_map interp_mtx = level.interp_mtx;
-            auto i_entries = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), interp_mtx.map);
-            fwrite(i_entries.data(), sizeof(ordinal_t), prev_n, cgfp);
-        }
-        prev_n = N;
-    }
-    fclose(cgfp);
-}
-
-//writes part to binary file
-void dump_coarse_part(part_vt part){
-    FILE* cgfp = fopen("coarse_part.out", "wb");
-    ordinal_t n = part.extent(0);
-    auto part_m = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), part);
-    fwrite(part_m.data(), sizeof(part_t), n, cgfp);
-    fclose(cgfp);
-}
-
 //reads part from binary file
 part_vt load_coarse_part(ordinal_t n){
     FILE* cgfp = fopen("coarse_part.out", "r");
@@ -344,6 +303,4 @@ part_vt load_coarse_part(ordinal_t n){
     Kokkos::deep_copy(part, part_m);
     fclose(cgfp);
     return part;
-}
-
 }

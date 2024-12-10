@@ -36,86 +36,14 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //
 // ************************************************************************
-#include "contract.hpp"
-#include "uncoarsen.hpp"
-#include "initial_partition.hpp"
+
 #include "defs.h"
 #include "io.hpp"
+#include "jet.h"
+#include "config.h"
 #include <limits>
 #include <vector>
 #include <algorithm>
-
-using namespace jet_partitioner;
-
-part_vt partition(value_t& edge_cut,
-                                  const config_t& config,
-                                  matrix_t g,
-                                  wgt_view_t vweights,
-                                  bool uniform_ew,
-                                  ExperimentLoggerUtil<value_t>& experiment) {
-
-    using coarsener_t = contracter<matrix_t>;
-    using init_t = initial_partitioner<matrix_t, part_t>;
-    using uncoarsener_t = uncoarsener<matrix_t, part_t>;
-    using coarse_level_triple = typename coarsener_t::coarse_level_triple;
-    using stat = part_stat<matrix_t, part_t>;
-    coarsener_t coarsener;
-
-    std::list<coarse_level_triple> cg_list;
-    Kokkos::fence();
-    Kokkos::Timer t;
-    double start_time = t.seconds();
-    part_t k = config.num_parts;
-
-    switch(config.coarsening_alg){
-        case 0:
-            coarsener.set_heuristic(coarsener_t::MtMetis);
-            break;
-        case 1:
-            coarsener.set_heuristic(coarsener_t::HECv1);
-            break;
-        case 2:
-            coarsener.set_heuristic(coarsener_t::Match);
-            break;
-        default:
-            coarsener.set_heuristic(coarsener_t::MtMetis);
-    }
-    int cutoff = k*8;
-    if(cutoff > 1024){
-        cutoff = k*2;
-        cutoff = std::max(1024, cutoff);
-    }
-    coarsener.set_coarse_vtx_cutoff(cutoff);
-    coarsener.set_min_allowed_vtx(cutoff / 4);
-    cg_list = coarsener.generate_coarse_graphs(g, vweights, experiment, uniform_ew);
-    Kokkos::fence();
-    double fin_coarsening_time = t.seconds();
-    double imb_ratio = config.max_imb_ratio;
-    part_vt coarsest_p = init_t::metis_init(cg_list.back().mtx, cg_list.back().vtx_w, k, imb_ratio);
-    //part_vt coarsest_p = init_t::random_init(cg_list.back().vtx_w, k, imb_ratio);
-    Kokkos::fence();
-    experiment.addMeasurement(Measurement::InitPartition, t.seconds() - fin_coarsening_time);
-    part_vt part = uncoarsener_t::uncoarsen(cg_list, coarsest_p, k, imb_ratio
-        , edge_cut, experiment);
-
-    Kokkos::fence();
-    double fin_uncoarsening = t.seconds();
-    cg_list.clear();
-    Kokkos::fence();
-    double fin_time = t.seconds();
-    experiment.addMeasurement(Measurement::Total, fin_time - start_time);
-    experiment.addMeasurement(Measurement::Coarsen, fin_coarsening_time - start_time);
-    experiment.addMeasurement(Measurement::FreeGraph, fin_time - fin_uncoarsening);
-    
-    // additional partition statistics
-    experiment.setMaxPartCut(stat::max_part_cut(g, part, k));
-    experiment.setObjective(stat::comm_size(g, part, k));
-
-    experiment.refinementReport();
-    experiment.verboseReport();
-
-    return part;
-}
 
 void degree_weighting(const matrix_t& g, wgt_view_t vweights){
     Kokkos::parallel_for("set v weights", r_policy(0, g.numRows()), KOKKOS_LAMBDA(const ordinal_t i){
@@ -140,7 +68,7 @@ int main(int argc, char **argv) {
         std::cerr << "Usage: " << argv[0] << " <metis_graph_file> <config_file> <optional partition_output_filename> <optional metrics_filename>" << std::endl;
         return -1;
     }
-    config_t config;
+    jet_partitioner::config_t config;
     char *filename = argv[1];
     if(!load_config(config, argv[2])) return -1;
     char *part_file = nullptr;
@@ -151,6 +79,14 @@ int main(int argc, char **argv) {
     if(argc >= 5){
         metrics = argv[4];
     }
+#ifdef FOUR9
+    config.refine_tolerance = 0.9999;
+#elif defined TWO9
+    config.refine_tolerance = 0.99;
+#endif
+#ifdef EXP
+    config.dump_coarse = true;
+#endif
 
     Kokkos::initialize();
     //must scope kokkos-related data
@@ -171,9 +107,17 @@ int main(int argc, char **argv) {
         for (int i=0; i < config.num_iter; i++) {
             Kokkos::fence();
             value_t edgecut = 0;
-            ExperimentLoggerUtil<value_t> experiment;
-            part_vt part = partition(edgecut, config, g, vweights, uniform_ew,
+            jet_partitioner::ExperimentLoggerUtil<value_t> experiment;
+#ifdef HOST
+            part_vt part = jet_partitioner::partition_host(edgecut, config, g, vweights, uniform_ew,
                 experiment);
+#elif defined SERIAL
+            part_vt part = jet_partitioner::partition_serial(edgecut, config, g, vweights, uniform_ew,
+                experiment);
+#else
+            part_vt part = jet_partitioner::partition(edgecut, config, g, vweights, uniform_ew,
+                experiment);
+#endif
             avg += edgecut;
             cuts.push_back(edgecut);
 

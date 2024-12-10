@@ -62,17 +62,39 @@ public:
     using uncoarsener_t = uncoarsener<matrix_t, part_t>;
     using coarse_level_triple = typename coarsener_t::coarse_level_triple;
 
-static part_vt partition(matrix_t g, wgt_view_t vweights, const part_t k, const double imb_ratio, bool uniform_ew,
-                                  ExperimentLoggerUtil<scalar_t>& experiment) {
+static part_vt partition(value_t& edge_cut,
+                                  const config_t& config,
+                                  const matrix_t g,
+                                  const wgt_view_t vweights,
+                                  bool uniform_ew,
+                                  ExperimentLoggerUtil<value_t>& experiment) {
 
+    using coarsener_t = contracter<matrix_t>;
+    using init_t = initial_partitioner<matrix_t, part_t>;
+    using uncoarsener_t = uncoarsener<matrix_t, part_t>;
+    using coarse_level_triple = typename coarsener_t::coarse_level_triple;
+    using stat = part_stat<matrix_t, part_t>;
     coarsener_t coarsener;
 
     std::list<coarse_level_triple> cg_list;
+    Kokkos::fence();
     Kokkos::Timer t;
     double start_time = t.seconds();
+    part_t k = config.num_parts;
 
-    //coarsener.set_heuristic(coarsener_t::HECv1);
-    coarsener.set_heuristic(coarsener_t::MtMetis);
+    switch(config.coarsening_alg){
+        case 0:
+            coarsener.set_heuristic(coarsener_t::MtMetis);
+            break;
+        case 1:
+            coarsener.set_heuristic(coarsener_t::HECv1);
+            break;
+        case 2:
+            coarsener.set_heuristic(coarsener_t::Match);
+            break;
+        default:
+            coarsener.set_heuristic(coarsener_t::MtMetis);
+    }
     int cutoff = k*8;
     if(cutoff > 1024){
         cutoff = k*2;
@@ -83,20 +105,29 @@ static part_vt partition(matrix_t g, wgt_view_t vweights, const part_t k, const 
     cg_list = coarsener.generate_coarse_graphs(g, vweights, experiment, uniform_ew);
     Kokkos::fence();
     double fin_coarsening_time = t.seconds();
-    experiment.addMeasurement(Measurement::Coarsen, fin_coarsening_time - start_time);
+    double imb_ratio = config.max_imb_ratio;
     part_vt coarsest_p = init_t::metis_init(cg_list.back().mtx, cg_list.back().vtx_w, k, imb_ratio);
     //part_vt coarsest_p = init_t::random_init(cg_list.back().vtx_w, k, imb_ratio);
     Kokkos::fence();
     experiment.addMeasurement(Measurement::InitPartition, t.seconds() - fin_coarsening_time);
-    scalar_t edge_cut = 0;
-    part_vt part = uncoarsener_t::uncoarsen(cg_list, coarsest_p, k, imb_ratio
-        , edge_cut, experiment);
+    part_vt part = uncoarsener_t::uncoarsen(cg_list, coarsest_p, config,
+        edge_cut, experiment);
 
     Kokkos::fence();
+    double fin_uncoarsening = t.seconds();
     cg_list.clear();
     Kokkos::fence();
     double fin_time = t.seconds();
     experiment.addMeasurement(Measurement::Total, fin_time - start_time);
+    experiment.addMeasurement(Measurement::Coarsen, fin_coarsening_time - start_time);
+    experiment.addMeasurement(Measurement::FreeGraph, fin_time - fin_uncoarsening);
+    
+    // additional partition statistics
+    experiment.setMaxPartCut(stat::max_part_cut(g, part, k));
+    experiment.setObjective(stat::comm_size(g, part, k));
+
+    experiment.refinementReport();
+    experiment.verboseReport();
 
     return part;
 }
