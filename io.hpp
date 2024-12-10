@@ -44,6 +44,8 @@
 #include <string>
 #include <iostream>
 
+namespace jet_partitioner {
+
 bool load_config(jet_partitioner::config_t& c, const char* config_f) {
 
     std::ifstream f(config_f);
@@ -304,3 +306,5 @@ part_vt load_coarse_part(ordinal_t n){
     fclose(cgfp);
     return part;
 }
+
+};

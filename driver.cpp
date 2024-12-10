@@ -45,6 +45,8 @@
 #include <vector>
 #include <algorithm>
 
+using namespace jet_partitioner;
+
 void degree_weighting(const matrix_t& g, wgt_view_t vweights){
     Kokkos::parallel_for("set v weights", r_policy(0, g.numRows()), KOKKOS_LAMBDA(const ordinal_t i){
         vweights(i) = g.graph.row_map(i + 1) - g.graph.row_map(i);
@@ -68,7 +70,7 @@ int main(int argc, char **argv) {
         std::cerr << "Usage: " << argv[0] << " <metis_graph_file> <config_file> <optional partition_output_filename> <optional metrics_filename>" << std::endl;
         return -1;
     }
-    jet_partitioner::config_t config;
+    config_t config;
     char *filename = argv[1];
     if(!load_config(config, argv[2])) return -1;
     char *part_file = nullptr;
@@ -107,15 +109,15 @@ int main(int argc, char **argv) {
         for (int i=0; i < config.num_iter; i++) {
             Kokkos::fence();
             value_t edgecut = 0;
-            jet_partitioner::ExperimentLoggerUtil<value_t> experiment;
+            ExperimentLoggerUtil<value_t> experiment;
 #ifdef HOST
-            part_vt part = jet_partitioner::partition_host(edgecut, config, g, vweights, uniform_ew,
+            part_vt part = partition_host(edgecut, config, g, vweights, uniform_ew,
                 experiment);
 #elif defined SERIAL
-            part_vt part = jet_partitioner::partition_serial(edgecut, config, g, vweights, uniform_ew,
+            part_vt part = partition_serial(edgecut, config, g, vweights, uniform_ew,
                 experiment);
 #else
-            part_vt part = jet_partitioner::partition(edgecut, config, g, vweights, uniform_ew,
+            part_vt part = partition(edgecut, config, g, vweights, uniform_ew,
                 experiment);
 #endif
             avg += edgecut;

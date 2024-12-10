@@ -42,6 +42,7 @@
 #include <Kokkos_Core.hpp>
 #include "KokkosSparse_CrsMatrix.hpp"
 
+namespace jet_partitioner {
 #if defined(SGPAR_HUGEGRAPHS)
 typedef int64_t ordinal_t;
 typedef int64_t edge_offset_t;
@@ -87,3 +88,5 @@ using member = typename policy::member_type;
 using part_t = int;
 using part_vt = Kokkos::View<part_t*, Device>;
 using part_mt = typename part_vt::HostMirror;
+
+};
