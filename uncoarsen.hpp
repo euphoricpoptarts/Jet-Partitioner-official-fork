@@ -38,7 +38,7 @@
 // ************************************************************************
 #include "jet_refiner.hpp"
 #include "contract.hpp"
-#include "config.h"
+#include "jet_config.h"
 #include <limits>
 #include <cstdlib>
 #include <cmath>

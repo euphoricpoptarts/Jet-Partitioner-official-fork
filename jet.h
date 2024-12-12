@@ -37,9 +37,9 @@
 //
 // ************************************************************************
 
-#include "defs.h"
+#include "jet_defs.h"
 #include "ExperimentLoggerUtil.hpp"
-#include "config.h"
+#include "jet_config.h"
 
 namespace jet_partitioner {
 

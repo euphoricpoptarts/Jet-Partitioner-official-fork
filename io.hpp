@@ -37,8 +37,8 @@
 //
 // ************************************************************************
 #pragma once
-#include "defs.h"
-#include "config.h"
+#include "jet_defs.h"
+#include "jet_config.h"
 #include "contract.hpp"
 #include <sstream>
 #include <string>

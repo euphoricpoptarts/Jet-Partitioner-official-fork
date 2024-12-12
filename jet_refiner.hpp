@@ -45,7 +45,7 @@
 #include "KokkosSparse_CrsMatrix.hpp"
 #include "ExperimentLoggerUtil.hpp"
 #include "part_stat.hpp"
-#include "config.h"
+#include "jet_config.h"
 
 namespace jet_partitioner {
 

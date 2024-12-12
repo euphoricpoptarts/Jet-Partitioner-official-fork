@@ -37,10 +37,10 @@
 //
 // ************************************************************************
 
-#include "defs.h"
+#include "jet_defs.h"
 #include "io.hpp"
 #include "jet.h"
-#include "config.h"
+#include "jet_config.h"
 #include <limits>
 #include <vector>
 #include <algorithm>

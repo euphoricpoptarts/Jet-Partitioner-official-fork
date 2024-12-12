@@ -38,7 +38,7 @@
 // ************************************************************************
 #include "contract.hpp"
 #include "uncoarsen.hpp"
-#include "defs.h"
+#include "jet_defs.h"
 #include "io.hpp"
 #include <limits>
 

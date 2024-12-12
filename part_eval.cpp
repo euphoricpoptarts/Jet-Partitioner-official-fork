@@ -37,7 +37,7 @@
 //
 // ************************************************************************
 #include "part_stat.hpp"
-#include "defs.h"
+#include "jet_defs.h"
 #include "io.hpp"
 #include <limits>
 
