@@ -110,8 +110,8 @@ public:
                 int condition = u < v;
                 //need to enforce an ordering condition to allow hard-stall conditions to be broken
                 if (condition ^ swap) {
-                    if (Kokkos::atomic_compare_exchange_strong(&vcmap(u), ORD_MAX, ORD_MAX - 1)) {
-                        if (u == v || Kokkos::atomic_compare_exchange_strong(&vcmap(v), ORD_MAX, ORD_MAX - 1)) {
+                    if (Kokkos::atomic_compare_exchange(&vcmap(u), ORD_MAX, ORD_MAX - 1) == ORD_MAX) {
+                        if (u == v || Kokkos::atomic_compare_exchange(&vcmap(v), ORD_MAX, ORD_MAX - 1) == ORD_MAX) {
                             ordinal_t cv = u;
                             if(v < u){
                                 cv = v;
@@ -311,9 +311,9 @@ public:
             while(!found){
                 ordinal_t twin = twins(key);
                 if(twin == -1){
-                    if(Kokkos::atomic_compare_exchange_strong(&twins(key), twin, i)) found = true;
+                    if(Kokkos::atomic_compare_exchange(&twins(key), twin, i) == twin) found = true;
                 } else {
-                    if(Kokkos::atomic_compare_exchange_strong(&twins(key), twin, -1)){
+                    if(Kokkos::atomic_compare_exchange(&twins(key), twin, -1) == twin){
                         ordinal_t cv = twin < i ? twin : i;
                         vcmap(twin) = cv;
                         vcmap(i) = cv;
@@ -493,7 +493,7 @@ public:
                     ordinal_t v = hn(u);
                     if(v == ORD_MAX || vcmap(u) != ORD_MAX) return;
                     ordinal_t cv = u < v ? u : v;
-                    if (Kokkos::atomic_compare_exchange_strong(&vcmap(v), ORD_MAX - 1, cv)) {
+                    if (Kokkos::atomic_compare_exchange(&vcmap(v), ORD_MAX - 1, cv) == ORD_MAX - 1) {
                         vcmap(u) = cv;
                     }
                 });

@@ -671,7 +671,7 @@ static void build_row_cdata_large(const conn_data& cdata, const matrix_t& g, con
         part_t p = part(v);
         part_t p_o = p % size;
         if(size == k){
-            if(s_conn_entries[p_o] == NULL_PART && Kokkos::atomic_compare_exchange_strong(s_conn_entries + p_o, NULL_PART, p)) Kokkos::atomic_add(used_cap, 1);
+            if(s_conn_entries[p_o] == NULL_PART && Kokkos::atomic_compare_exchange(s_conn_entries + p_o, NULL_PART, p) == NULL_PART) Kokkos::atomic_add(used_cap, 1);
         } else {
             bool success = false;
             while(!success){
@@ -719,7 +719,7 @@ static void build_row_cdata_large(const conn_data& cdata, const matrix_t& g, con
                     while(cdata.conn_entries(g_start + p_o) != NULL_PART){
                         p_o = (p_o + 1) % size;
                     }
-                    if(Kokkos::atomic_compare_exchange_strong(&cdata.conn_entries(g_start + p_o), NULL_PART, p)){
+                    if(Kokkos::atomic_compare_exchange(&cdata.conn_entries(g_start + p_o), NULL_PART, p) == NULL_PART){
                         success = true;
                     } else {
                         p_o = (p_o + 1) % size;
