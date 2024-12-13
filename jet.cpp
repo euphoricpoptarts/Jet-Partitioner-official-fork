@@ -74,4 +74,64 @@ part_mt partition_serial(value_t& edge_cut,
     return partitioner<serial_matrix_t, part_t>::partition(edge_cut, config, g, vweights, uniform_ew, experiment);
 }
 
+part_vt partition_big(big_val_t& edge_cut,
+                const config_t& config,
+                const big_matrix_t g,
+                const big_wgt_vt vweights,
+                bool uniform_ew,
+                ExperimentLoggerUtil<big_val_t>& experiment){
+
+    return partitioner<big_matrix_t, part_t>::partition(edge_cut, config, g, vweights, uniform_ew, experiment);
+}
+
+part_mt partition_host_big(big_val_t& edge_cut,
+                const config_t& config,
+                const big_host_matrix_t g,
+                const big_wgt_host_vt vweights,
+                bool uniform_ew,
+                ExperimentLoggerUtil<big_val_t>& experiment){
+
+    return partitioner<big_host_matrix_t, part_t>::partition(edge_cut, config, g, vweights, uniform_ew, experiment);
+}
+
+part_mt partition_serial_big(big_val_t& edge_cut,
+                const config_t& config,
+                const big_serial_matrix_t g,
+                const big_wgt_serial_vt vweights,
+                bool uniform_ew,
+                ExperimentLoggerUtil<big_val_t>& experiment){
+
+    return partitioner<big_serial_matrix_t, part_t>::partition(edge_cut, config, g, vweights, uniform_ew, experiment);
+}
+
+part_vt partition_biggest(big_val_t& edge_cut,
+                const config_t& config,
+                const biggest_matrix_t g,
+                const big_wgt_vt vweights,
+                bool uniform_ew,
+                ExperimentLoggerUtil<big_val_t>& experiment){
+
+    return partitioner<biggest_matrix_t, part_t>::partition(edge_cut, config, g, vweights, uniform_ew, experiment);
+}
+
+part_mt partition_host_biggest(big_val_t& edge_cut,
+                const config_t& config,
+                const biggest_host_matrix_t g,
+                const big_wgt_host_vt vweights,
+                bool uniform_ew,
+                ExperimentLoggerUtil<big_val_t>& experiment){
+
+    return partitioner<biggest_host_matrix_t, part_t>::partition(edge_cut, config, g, vweights, uniform_ew, experiment);
+}
+
+part_mt partition_serial_biggest(big_val_t& edge_cut,
+                const config_t& config,
+                const biggest_serial_matrix_t g,
+                const big_wgt_serial_vt vweights,
+                bool uniform_ew,
+                ExperimentLoggerUtil<big_val_t>& experiment){
+
+    return partitioner<biggest_serial_matrix_t, part_t>::partition(edge_cut, config, g, vweights, uniform_ew, experiment);
+}
+
 }

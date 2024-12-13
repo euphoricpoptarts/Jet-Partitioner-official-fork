@@ -43,17 +43,14 @@
 #include "KokkosSparse_CrsMatrix.hpp"
 
 namespace jet_partitioner {
-#if defined(SGPAR_HUGEGRAPHS)
-typedef int64_t ordinal_t;
-typedef int64_t edge_offset_t;
-#elif defined(SGPAR_LARGEGRAPHS)
-typedef int32_t ordinal_t;
-typedef int64_t edge_offset_t;
-#else
-typedef int32_t ordinal_t;
-typedef int32_t edge_offset_t;
-#endif
-typedef edge_offset_t value_t;
+
+using big_ordinal_t = int64_t;
+using big_offset_t = int64_t;
+using big_val_t = int64_t;
+
+using ordinal_t = int32_t;
+using edge_offset_t = int32_t;
+using value_t = int32_t;
 
 #if defined(SERIAL)
 using Device = Kokkos::Serial;
@@ -62,11 +59,12 @@ using Device = Kokkos::DefaultHostExecutionSpace;
 #else
 using Device = Kokkos::DefaultExecutionSpace;
 #endif
+
+// standard sized graphs
 using matrix_t = typename KokkosSparse::CrsMatrix<value_t, ordinal_t, Device, void, edge_offset_t>;
 using host_matrix_t = typename KokkosSparse::CrsMatrix<value_t, ordinal_t, Kokkos::DefaultHostExecutionSpace, void, edge_offset_t>;
 using serial_matrix_t = typename KokkosSparse::CrsMatrix<value_t, ordinal_t, Kokkos::Serial, void, edge_offset_t>;
 using graph_t = typename matrix_t::staticcrsgraph_type;
-
 using edge_view_t = Kokkos::View<edge_offset_t*, Device>;
 using edge_mirror_t = typename edge_view_t::HostMirror;
 using vtx_view_t = Kokkos::View<ordinal_t*, Device>;
@@ -79,5 +77,18 @@ using r_policy = Kokkos::RangePolicy<typename Device::execution_space>;
 using part_t = int;
 using part_vt = Kokkos::View<part_t*, Device>;
 using part_mt = typename part_vt::HostMirror;
+
+// bigger graphs (large edge counts and potentially large edge weights for coarse graphs)
+using big_matrix_t = typename KokkosSparse::CrsMatrix<big_val_t, ordinal_t, Device, void, big_offset_t>;
+using big_host_matrix_t = typename KokkosSparse::CrsMatrix<big_val_t, ordinal_t, Kokkos::DefaultHostExecutionSpace, void, big_offset_t>;
+using big_serial_matrix_t = typename KokkosSparse::CrsMatrix<big_val_t, ordinal_t, Kokkos::Serial, void, big_offset_t>;
+using big_wgt_vt = Kokkos::View<big_val_t*, Device>;
+using big_wgt_host_vt = Kokkos::View<big_val_t*, Kokkos::DefaultHostExecutionSpace>;
+using big_wgt_serial_vt = Kokkos::View<big_val_t*, Kokkos::Serial>;
+
+// biggest graphs (bigger graphs + large vertex counts)
+using biggest_matrix_t = typename KokkosSparse::CrsMatrix<big_val_t, big_ordinal_t, Device, void, big_offset_t>;
+using biggest_host_matrix_t = typename KokkosSparse::CrsMatrix<big_val_t, big_ordinal_t, Kokkos::DefaultHostExecutionSpace, void, big_offset_t>;
+using biggest_serial_matrix_t = typename KokkosSparse::CrsMatrix<big_val_t, big_ordinal_t, Kokkos::Serial, void, big_offset_t>;
 
 };

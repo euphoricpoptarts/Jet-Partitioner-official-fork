@@ -354,7 +354,7 @@ coarse_level_triple build_coarse_graph(const coarse_level_triple level,
     ordinal_t nc = vcmap.coarse_vtx;
 
     Kokkos::Timer timer;
-    edge_view_t hrow_map = Kokkos::subview(scratch.hrow_map, std::make_pair(0, nc + 1));
+    edge_view_t hrow_map = Kokkos::subview(scratch.hrow_map, std::make_pair(static_cast<ordinal_t>(0), nc + 1));
     Kokkos::deep_copy(exec_space(), hrow_map, 0);
     wgt_view_t f_vtx_w = level.vtx_w;
     wgt_view_t c_vtx_w = wgt_view_t("coarse vertex weights", nc);
@@ -375,9 +375,9 @@ coarse_level_triple build_coarse_graph(const coarse_level_triple level,
     Kokkos::fence();
     experiment.addMeasurement(Measurement::Prefix, timer.seconds());
     timer.reset();
-    vtx_view_t htable = Kokkos::subview(scratch.htable, std::make_pair(0, hash_size));
+    vtx_view_t htable = Kokkos::subview(scratch.htable, std::make_pair(static_cast<edge_offset_t>(0), hash_size));
     Kokkos::deep_copy(exec_space(), htable, NULL_KEY);
-    wgt_view_t hvals = Kokkos::subview(scratch.hvals, std::make_pair(0, hash_size));
+    wgt_view_t hvals = Kokkos::subview(scratch.hvals, std::make_pair(static_cast<edge_offset_t>(0), hash_size));
     Kokkos::deep_copy(exec_space(), hvals, 0);
     // use thread teams on gpu when graph has decent average degree or very large max degree
     bool use_team = (!is_host_space && (hash_size / n >= 12 || has_large_row(g)));

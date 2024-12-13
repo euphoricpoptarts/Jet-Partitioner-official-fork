@@ -57,12 +57,12 @@ public:
     using uncoarsener_t = uncoarsener<matrix_t, part_t>;
     using coarse_level_triple = typename coarsener_t::coarse_level_triple;
 
-static part_vt partition(value_t& edge_cut,
+static part_vt partition(scalar_t& edge_cut,
                                   const config_t& config,
                                   const matrix_t g,
                                   const wgt_view_t vweights,
                                   bool uniform_ew,
-                                  ExperimentLoggerUtil<value_t>& experiment) {
+                                  ExperimentLoggerUtil<scalar_t>& experiment) {
 
     using coarsener_t = contracter<matrix_t>;
     using init_t = initial_partitioner<matrix_t, part_t>;
