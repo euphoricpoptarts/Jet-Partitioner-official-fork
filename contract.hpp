@@ -55,7 +55,6 @@ public:
     // define internal types
     using matrix_t = crsMat;
     using exec_space = typename matrix_t::execution_space;
-    using mem_space = typename matrix_t::memory_space;
     using Device = typename matrix_t::device_type;
     using ordinal_t = typename matrix_t::ordinal_type;
     using edge_offset_t = typename matrix_t::size_type;
@@ -63,12 +62,10 @@ public:
     using vtx_view_t = Kokkos::View<ordinal_t*, Device>;
     using wgt_view_t = Kokkos::View<scalar_t*, Device>;
     using edge_view_t = Kokkos::View<edge_offset_t*, Device>;
-    using edge_subview_t = Kokkos::View<edge_offset_t, Device>;
     using graph_type = typename matrix_t::staticcrsgraph_type;
     using policy_t = Kokkos::RangePolicy<exec_space>;
     using dyn_policy_t = Kokkos::RangePolicy<Kokkos::Schedule<Kokkos::Dynamic>, exec_space>;
     using team_policy_t = Kokkos::TeamPolicy<exec_space>;
-    using dyn_team_policy_t = Kokkos::TeamPolicy<Kokkos::Schedule<Kokkos::Dynamic>, exec_space>;
     using member = typename team_policy_t::member_type;
     using pool_t = Kokkos::Random_XorShift64_Pool<Device>;
     using coarse_map = typename coarsen_heuristics<matrix_t>::coarse_map;
@@ -81,7 +78,7 @@ public:
             return std::numeric_limits<ordinal_t>::max();
         }
     }
-    static constexpr ordinal_t ORD_MAX  = get_null_val();
+    static constexpr ordinal_t NULL_KEY  = get_null_val();
     static constexpr bool is_host_space = std::is_same<typename exec_space::memory_space, typename Kokkos::DefaultHostExecutionSpace::memory_space>::value;
     // contains matrix and vertex weights corresponding to current level
     // interp matrix maps previous level to this level
@@ -202,10 +199,10 @@ struct combineAndDedupe {
             edge_offset_t offset = abs(xorshiftHash<ordinal_t>(u)) % size;
             while(true){
                 ordinal_t v = htable(hash_start + offset);
-                if(v == -1){
-                    v = Kokkos::atomic_compare_exchange(&htable(hash_start + offset), -1, u);
+                if(v == NULL_KEY){
+                    v = Kokkos::atomic_compare_exchange(&htable(hash_start + offset), NULL_KEY, u);
                 }
-                if(v == u || v == -1){
+                if(v == u || v == NULL_KEY){
                     return offset;
                 }
                 offset++;
@@ -268,7 +265,7 @@ struct countUnique {
         const edge_offset_t end = hrow_map(i + 1);
         ordinal_t uniques = 0;
         Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, start, end), [=](const edge_offset_t j, ordinal_t& update){
-            if(htable(j) != -1){
+            if(htable(j) != NULL_KEY){
                 update++;
             }
         }, uniques);
@@ -284,7 +281,7 @@ struct countUnique {
         const edge_offset_t end = hrow_map(i + 1);
         ordinal_t uniques = 0;
         for(edge_offset_t j = start; j < end; j++) {
-            if(htable(j) != -1){
+            if(htable(j) != NULL_KEY){
                 uniques++;
             }
         }
@@ -321,7 +318,7 @@ struct consolidateUnique {
         *total = 0;
         thread.team_barrier();
         Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [=](const edge_offset_t j){
-            if(htable(j) != -1){
+            if(htable(j) != NULL_KEY){
                 //we don't care about the insertion order
                 //this is faster than a scan
                 ordinal_t insert = Kokkos::atomic_fetch_add(total, 1);
@@ -338,7 +335,7 @@ struct consolidateUnique {
         const edge_offset_t end = hrow_map(i + 1);
         edge_offset_t write_to = coarse_row_map_f(i);
         for (edge_offset_t j = start; j < end; j++){
-            if(htable(j) != -1){
+            if(htable(j) != NULL_KEY){
                 entries_coarse(write_to) = htable(j);
                 wgts_coarse(write_to) = hvals(j);
                 write_to++;
@@ -379,7 +376,7 @@ coarse_level_triple build_coarse_graph(const coarse_level_triple level,
     experiment.addMeasurement(Measurement::Prefix, timer.seconds());
     timer.reset();
     vtx_view_t htable = Kokkos::subview(scratch.htable, std::make_pair(0, hash_size));
-    Kokkos::deep_copy(exec_space(), htable, -1);
+    Kokkos::deep_copy(exec_space(), htable, NULL_KEY);
     wgt_view_t hvals = Kokkos::subview(scratch.hvals, std::make_pair(0, hash_size));
     Kokkos::deep_copy(exec_space(), hvals, 0);
     // use thread teams on gpu when graph has decent average degree or very large max degree

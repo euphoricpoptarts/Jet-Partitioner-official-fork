@@ -54,25 +54,18 @@ public:
     // define internal types
     using matrix_t = crsMat;
     using exec_space = typename matrix_t::execution_space;
-    using mem_space = typename matrix_t::memory_space;
     using Device = typename matrix_t::device_type;
     using ordinal_t = typename matrix_t::ordinal_type;
-    using edge_offset_t = typename matrix_t::size_type;
     using scalar_t = typename matrix_t::value_type;
     using vtx_view_t = Kokkos::View<ordinal_t*, Device>;
-    using vtx_mirror_t = typename vtx_view_t::HostMirror;
     using wgt_view_t = Kokkos::View<scalar_t*, Device>;
     using wgt_mirror_t = typename wgt_view_t::HostMirror;
-    using edge_view_t = Kokkos::View<edge_offset_t*, Device>;
-    using edge_subview_t = Kokkos::View<edge_offset_t, Device>;
     using part_vt = Kokkos::View<part_t*, Device>;
     using part_mt = typename part_vt::HostMirror;
     using metis_int = int;
     using metis_vt = Kokkos::View<metis_int*, Device>;
     using metis_mt = typename metis_vt::HostMirror;
-    using graph_type = typename matrix_t::staticcrsgraph_type;
     using policy_t = Kokkos::RangePolicy<exec_space>;
-    using coarsener_t = contracter<matrix_t>;
 
 template <class dst_vt, class src_vt>
 static void copy(dst_vt dst, src_vt src){

@@ -68,6 +68,8 @@ int main(int argc, char **argv) {
         part_vt part = load_part(g.numRows(), part_file);
         using stat = part_stat<matrix_t, part_t>; 
         using h_t = stat::gain_2vt;
+        using gain_t = stat::gain_t;
+        using gain_vt = stat::gain_vt;
         value_t cut = stat::get_total_cut(g, part);
         h_t heatmap_d = stat::cut_heatmap(g, part, k);
         h_t::HostMirror heatmap = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), heatmap_d);

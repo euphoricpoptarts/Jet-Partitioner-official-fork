@@ -47,15 +47,10 @@ class partitioner {
 public:
 
     using matrix_t = crsMat;
-    using exec_space = typename matrix_t::execution_space;
-    using mem_space = typename matrix_t::memory_space;
     using Device = typename matrix_t::device_type;
     using ordinal_t = typename matrix_t::ordinal_type;
-    using edge_offset_t = typename matrix_t::size_type;
     using scalar_t = typename matrix_t::value_type;
-    using vtx_view_t = Kokkos::View<ordinal_t*, Device>;
     using wgt_view_t = Kokkos::View<scalar_t*, Device>;
-    using edge_view_t = Kokkos::View<edge_offset_t*, Device>;
     using part_vt = Kokkos::View<part_t*, Device>;
     using coarsener_t = contracter<matrix_t>;
     using init_t = initial_partitioner<matrix_t, part_t>;

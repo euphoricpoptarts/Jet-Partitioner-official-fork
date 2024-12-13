@@ -61,21 +61,15 @@ public:
     // define internal types
     using matrix_t = crsMat;
     using exec_space = typename matrix_t::execution_space;
-    using mem_space = typename matrix_t::memory_space;
     using Device = typename matrix_t::device_type;
     using ordinal_t = typename matrix_t::ordinal_type;
     using edge_offset_t = typename matrix_t::size_type;
     using scalar_t = typename matrix_t::value_type;
     using vtx_view_t = typename Kokkos::View<ordinal_t*, Device>;
     using wgt_view_t = typename Kokkos::View<scalar_t*, Device>;
-    using edge_view_t = typename Kokkos::View<edge_offset_t*, Device>;
-    using edge_subview_t = typename Kokkos::View<edge_offset_t, Device>;
-    using rand_view_t = typename Kokkos::View<uint64_t*, Device>;
-    using graph_type = typename matrix_t::staticcrsgraph_type;
     using policy_t = typename Kokkos::RangePolicy<exec_space>;
     using team_policy_t = typename Kokkos::TeamPolicy<exec_space>;
     using member = typename team_policy_t::member_type;
-    using part_view_t = typename Kokkos::View<int*, Device>;
     using pool_t = Kokkos::Random_XorShift64_Pool<Device>;
     using gen_t = typename pool_t::generator_type;
     using hasher_t = Kokkos::pod_hash<ordinal_t>;

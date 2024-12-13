@@ -79,12 +79,10 @@ public:
     using part_vt = Kokkos::View<part_t*, Device>;
     using part_svt = Kokkos::View<part_t, Device>;
     using gain_svt = Kokkos::View<gain_t, Device>;
-    using edge_subview_t = Kokkos::View<edge_offset_t, Device>;
     using policy_t = Kokkos::RangePolicy<exec_space>;
     using team_policy_t = Kokkos::TeamPolicy<exec_space>;
     using member = typename team_policy_t::member_type;
     using stat = part_stat<matrix_t, part_t>;
-    static constexpr ordinal_t ORD_MAX = std::numeric_limits<ordinal_t>::max();
     static constexpr gain_t GAIN_MIN = std::numeric_limits<gain_t>::lowest();
     static constexpr bool is_host_space = std::is_same<typename exec_space::memory_space, typename Kokkos::DefaultHostExecutionSpace::memory_space>::value;
     static constexpr part_t NULL_PART = -1;

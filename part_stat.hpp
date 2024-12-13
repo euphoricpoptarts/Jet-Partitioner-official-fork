@@ -61,17 +61,14 @@ public:
     // need some trickery because make_signed is undefined for floating point types
     using matrix_t = crsMat;
     using exec_space = typename matrix_t::execution_space;
-    using mem_space = typename matrix_t::memory_space;
     using Device = typename matrix_t::device_type;
     using ordinal_t = typename matrix_t::ordinal_type;
     using edge_offset_t = typename matrix_t::size_type;
     using edge_view_t = Kokkos::View<edge_offset_t*, Device>;
     using scalar_t = typename matrix_t::value_type;
     using gain_t = typename std::conditional_t<std::is_signed_v<scalar_t>, type_identity<scalar_t>, std::make_signed<scalar_t>>::type;
-    using vtx_view_t = Kokkos::View<ordinal_t*, Device>;
     using wgt_view_t = Kokkos::View<scalar_t*, Device>;
     using gain_vt = Kokkos::View<gain_t*, Device>;
-    using gain_svt = Kokkos::View<gain_t, Device>;
     using gain_pin_st = Kokkos::View<gain_t, Kokkos::SharedHostPinnedSpace>;
     using gain_2vt = Kokkos::View<gain_t**, Device>;
     using part_vt = Kokkos::View<part_t*, Device>;
