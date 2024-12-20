@@ -30,7 +30,7 @@ jet\_serial: jet but runs on the host on a single thread.
 pstat: Given a metis graph file, partition file, and k-value, will print out quality information on the partition.
 
 ### Using Jet Partitioner in Your Code
-We provide a cmake package that you can install on your system. Add `find_package(jet REQUIRED)` in your project's CMakeLists.txt file and link your executable/s to `jet::jet`. Include `jet.h` in your code to use one of the provided partitioning functions. Each function is distinguished by the target Kokkos execution space it will run in and the type of KokkosKernels CrsMatrix which it accepts. Reference `jet_defs.h` for the relevant template definitions of these parameters. You can set the desired part count and imbalance values on the input config_t struct.
+We provide a cmake package that you can install on your system. Add `find_package(jet CONFIG REQUIRED)` in your project's CMakeLists.txt file and link your executable/s to `jet::jet`. Include `jet.h` in your code to use one of the provided partitioning functions. Each function is distinguished by the target Kokkos execution space it will run in and the type of KokkosKernels CrsMatrix which it accepts. Reference `jet_defs.h` for the relevant template definitions of these parameters. You can set the desired part count and imbalance values on the input config_t struct.
 
 ### Input Format
 We do not yet support vertex weights within metis graph files.
