@@ -43,7 +43,7 @@
 #include <iomanip>
 #include <Kokkos_Core.hpp>
 #include "KokkosSparse_CrsMatrix.hpp"
-#include "ExperimentLoggerUtil.hpp"
+#include "experiment_data.hpp"
 #include "part_stat.hpp"
 #include "jet_config.h"
 
@@ -1048,7 +1048,7 @@ conn_data init_conn_data(const conn_data& scratch_cdata, const matrix_t& g, cons
     return cdata;
 }
 
-void jet_refine(const matrix_t g, const config_t& config, wgt_view_t vtx_w, part_vt best_part, int level, refine_data& best_state, ExperimentLoggerUtil<scalar_t>& experiment){
+void jet_refine(const matrix_t g, const config_t& config, wgt_view_t vtx_w, part_vt best_part, int level, refine_data& best_state, experiment_data<scalar_t>& experiment){
     Kokkos::Timer y;
     //contains several scratch views that are reused in each iteration
     //reallocating in each iteration would be expensive (GPU memory is often slow to deallocate)
@@ -1126,7 +1126,7 @@ void jet_refine(const matrix_t g, const config_t& config, wgt_view_t vtx_w, part
     Kokkos::fence();
     double best_imb_ratio = static_cast<double>(best_state.total_imb) / static_cast<double>(prob.opt);
     //divide cut by 2 because each cut edge is counted from both sides
-    typename ExperimentLoggerUtil<scalar_t>::CoarseLevel cl(best_state.cut / 2, best_imb_ratio, g.nnz(), g.numRows(), y.seconds(), iter_t.seconds(), iter_count, lab_counter);
+    typename experiment_data<scalar_t>::CoarseLevel cl(best_state.cut / 2, best_imb_ratio, g.nnz(), g.numRows(), y.seconds(), iter_t.seconds(), iter_count, lab_counter);
     experiment.addCoarseLevel(cl);
     y.reset();
     iter_t.reset();

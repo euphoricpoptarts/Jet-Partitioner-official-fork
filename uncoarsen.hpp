@@ -92,7 +92,7 @@ static void project(ordinal_t fine_n, vtx_view_t map, part_vt input, part_vt out
     });
 }
 
-static part_vt multilevel_jet(std::list<clt> cg_list, part_vt coarse_guess, const config_t& config, rfd_t& rfd, ExperimentLoggerUtil<scalar_t>& experiment, Kokkos::Timer& t){
+static part_vt multilevel_jet(std::list<clt> cg_list, part_vt coarse_guess, const config_t& config, rfd_t& rfd, experiment_data<scalar_t>& experiment, Kokkos::Timer& t){
     part_t k = config.num_parts;
     ref_t refiner(cg_list.front().mtx, k);
 
@@ -132,7 +132,7 @@ static part_vt multilevel_jet(std::list<clt> cg_list, part_vt coarse_guess, cons
 }
 
 static part_vt uncoarsen(std::list<clt> cg_list, part_vt coarsest, const config_t& config,
-    scalar_t& ec, ExperimentLoggerUtil<scalar_t>& experiment) {
+    scalar_t& ec, experiment_data<scalar_t>& experiment) {
 
     Kokkos::Timer t;
     rfd_t rfd;

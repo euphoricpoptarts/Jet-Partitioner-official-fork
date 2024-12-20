@@ -42,7 +42,7 @@
 #include <Kokkos_Sort.hpp>
 #include "KokkosSparse_CrsMatrix.hpp"
 #include "KokkosGraph_MIS2.hpp"
-#include "ExperimentLoggerUtil.hpp"
+#include "experiment_data.hpp"
 
 namespace jet_partitioner {
 
@@ -172,7 +172,7 @@ public:
         const wgt_view_t& vtx_w,
         bool uniform_weights,
         pool_t& rand_pool,
-        ExperimentLoggerUtil<scalar_t>& experiment) {
+        experiment_data<scalar_t>& experiment) {
 
         ordinal_t n = g.numRows();
 

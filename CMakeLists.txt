@@ -17,7 +17,7 @@ add_compile_options(-Wall -Wextra -Wshadow)
 add_library(jet STATIC jet.cpp)
 target_sources(jet PUBLIC
   FILE_SET HEADERS
-  FILES jet.h jet_defs.h jet_config.h ExperimentLoggerUtil.hpp
+  FILES jet.h jet_defs.h jet_config.h experiment_data.hpp
 )
 
 if(DEFINED METIS_DIR)

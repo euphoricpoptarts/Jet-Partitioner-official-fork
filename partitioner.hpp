@@ -62,7 +62,7 @@ static part_vt partition(scalar_t& edge_cut,
                                   const matrix_t g,
                                   const wgt_view_t vweights,
                                   bool uniform_ew,
-                                  ExperimentLoggerUtil<scalar_t>& experiment) {
+                                  experiment_data<scalar_t>& experiment) {
 
     using coarsener_t = contracter<matrix_t>;
     using init_t = initial_partitioner<matrix_t, part_t>;

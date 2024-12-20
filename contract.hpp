@@ -43,7 +43,7 @@
 #include "KokkosSparse_CrsMatrix.hpp"
 #include "KokkosKernels_HashmapAccumulator.hpp"
 #include "KokkosKernels_Uniform_Initialized_MemoryPool.hpp"
-#include "ExperimentLoggerUtil.hpp"
+#include "experiment_data.hpp"
 #include "heuristics.hpp"
 
 namespace jet_partitioner {
@@ -347,7 +347,7 @@ struct consolidateUnique {
 coarse_level_triple build_coarse_graph(const coarse_level_triple level,
     const coarse_map vcmap,
     scratch_mem scratch,
-    ExperimentLoggerUtil<scalar_t>& experiment) {
+    experiment_data<scalar_t>& experiment) {
 
     matrix_t g = level.mtx;
     ordinal_t n = g.numRows();
@@ -449,7 +449,7 @@ coarse_map generate_coarse_mapping(const matrix_t g,
     const wgt_view_t& vtx_w,
     bool uniform_weights,
     pool_t& rand_pool,
-    ExperimentLoggerUtil<scalar_t>& experiment) {
+    experiment_data<scalar_t>& experiment) {
 
     Kokkos::Timer timer;
     coarse_map interpolation_graph;
@@ -491,7 +491,7 @@ coarse_map generate_coarse_mapping(const matrix_t g,
     return interpolation_graph;
 }
 
-std::list<coarse_level_triple> generate_coarse_graphs(const matrix_t fine_g, const wgt_view_t vweights, ExperimentLoggerUtil<scalar_t>& experiment, bool uniform_eweights = false) {
+std::list<coarse_level_triple> generate_coarse_graphs(const matrix_t fine_g, const wgt_view_t vweights, experiment_data<scalar_t>& experiment, bool uniform_eweights = false) {
     std::list<coarse_level_triple> levels;
     coarse_level_triple finest;
     finest.mtx = fine_g;

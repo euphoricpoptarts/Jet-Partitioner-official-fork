@@ -46,7 +46,7 @@ using namespace jet_partitioner;
 
 part_vt partition(value_t& edge_cut,
                     const config_t& config,
-                    ExperimentLoggerUtil<value_t>& experiment) {
+                    experiment_data<value_t>& experiment) {
 
     using coarsener_t = contracter<matrix_t>;
     using uncoarsener_t = uncoarsener<matrix_t, part_t>;
@@ -112,7 +112,7 @@ int main(int argc, char **argv) {
         for (int i=0; i < config.num_iter; i++) {
             Kokkos::fence();
             value_t edgecut = 0;
-            ExperimentLoggerUtil<value_t> experiment;
+            experiment_data<value_t> experiment;
             part_vt part = partition(edgecut, config, experiment);
 
             if (edgecut < edgecut_min) {

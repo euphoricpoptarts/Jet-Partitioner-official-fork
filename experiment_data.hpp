@@ -71,7 +71,7 @@ enum class Measurement : int {
 };
 
 template <typename scalar_t>
-class ExperimentLoggerUtil {
+class experiment_data {
 
 public:
 	std::vector<std::string> measurementNames{
@@ -132,7 +132,7 @@ private:
     int64_t obj = 0;
 
 public:
-	ExperimentLoggerUtil() :
+	experiment_data() :
 		measurements(static_cast<int>(Measurement::END), 0.0)
 	{}
 

@@ -43,7 +43,7 @@
 #include <iomanip>
 #include <Kokkos_Core.hpp>
 #include "KokkosSparse_CrsMatrix.hpp"
-#include "ExperimentLoggerUtil.hpp"
+#include "experiment_data.hpp"
 
 namespace jet_partitioner {
 

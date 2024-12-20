@@ -109,7 +109,7 @@ int main(int argc, char **argv) {
         for (int i=0; i < config.num_iter; i++) {
             Kokkos::fence();
             value_t edgecut = 0;
-            ExperimentLoggerUtil<value_t> experiment;
+            experiment_data<value_t> experiment;
 #ifdef HOST
             part_vt part = partition_host(edgecut, config, g, vweights, uniform_ew,
                 experiment);
