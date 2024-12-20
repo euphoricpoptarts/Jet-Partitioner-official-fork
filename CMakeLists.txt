@@ -1,5 +1,5 @@
-cmake_minimum_required(VERSION 3.18)
-project(jetpartition LANGUAGES CXX VERSION 1.0.0)
+cmake_minimum_required(VERSION 3.23)
+project(jetpartition LANGUAGES CXX VERSION 1.1.0)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 if(NOT CMAKE_BUILD_TYPE)
@@ -19,15 +19,18 @@ target_sources(jet PUBLIC
   FILE_SET HEADERS
   FILES jet.h jet_defs.h jet_config.h ExperimentLoggerUtil.hpp
 )
+
+if(DEFINED METIS_DIR)
 # This is used by the build script
 # to avoid putting metis and gklib in the global path
 include_directories(${METIS_DIR}/include)
 # downstream targets need to know about these link directories
 target_link_directories(jet INTERFACE ${METIS_DIR}/lib)
+endif()
 
 # link libjet (for downstream library consumers)
 # no linking actually occurs for libjet itself
-target_link_libraries(jet PRIVATE Kokkos::kokkos Kokkos::kokkoskernels)
+target_link_libraries(jet PUBLIC Kokkos::kokkos Kokkos::kokkoskernels)
 target_link_libraries(jet PRIVATE metis)
 if(LINK_GKLIB)
 target_link_libraries(jet PRIVATE GKlib)
@@ -53,19 +56,17 @@ target_compile_definitions(jet_export PUBLIC HOST EXP)
 target_compile_definitions(jet_serial PUBLIC SERIAL)
 
 # link executables
-foreach(prog jet_ex jet4 jet2 jet_host jet_import jet_export jet_serial pstat)
-    target_link_libraries(${prog} Kokkos::kokkos Kokkos::kokkoskernels)
-endforeach(prog)
+target_link_libraries(jet_import Kokkos::kokkos Kokkos::kokkoskernels)
+target_link_libraries(pstat Kokkos::kokkos Kokkos::kokkoskernels)
 foreach(prog jet_ex jet4 jet2 jet_host jet_export jet_serial)
     target_link_libraries(${prog} jet)
 endforeach(prog)
 
 # install jetlib and create cmake package
-set(ConfigPackageLocation "~/workspace/install/jet")
 install(TARGETS jet
 EXPORT jetTargets
-FILE_SET HEADERS DESTINATION ${ConfigPackageLocation}/include
-ARCHIVE DESTINATION ${ConfigPackageLocation}/lib)
+FILE_SET HEADERS DESTINATION include
+ARCHIVE DESTINATION lib)
 
 include(CMakePackageConfigHelpers)
 
@@ -74,17 +75,17 @@ write_basic_package_version_file(
   COMPATIBILITY AnyNewerVersion
 )
 
+# install the cmake package
 install(FILES
   ${CMAKE_CURRENT_BINARY_DIR}/jet-config-version.cmake
   ${CMAKE_CURRENT_SOURCE_DIR}/cmake/jetConfig.cmake
-  DESTINATION ${ConfigPackageLocation}
+  DESTINATION lib/cmake/jet
 )
-
 install(EXPORT jetTargets
   FILE
     jetTargets.cmake
   NAMESPACE
     jet::
   DESTINATION
-    ${ConfigPackageLocation}
+    lib/cmake/jet
 )

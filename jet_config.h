@@ -41,10 +41,10 @@
 namespace jet_partitioner {
 
 struct config_t {
-    int coarsening_alg;
-    int num_iter;
-    double max_imb_ratio;
-    int num_parts;
+    int coarsening_alg = 0;
+    int num_iter = 1;
+    double max_imb_ratio = 1.03;
+    int num_parts = 2;
     double refine_tolerance = 0.999;
     bool dump_coarse = false;
 };

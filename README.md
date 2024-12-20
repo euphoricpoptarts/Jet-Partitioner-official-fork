@@ -15,7 +15,7 @@ Metis (https://github.com/KarypisLab/METIS): Used for initial partitioning of co
 
 ### Building
 
-Standard CMake build process. If your Metis build requires GKlib, add `-DLINK_GKLIB=True` to your cmake command when building Jet. Example build scripts are provided for macOS with OpenMP and Linux systems with Cuda. These scripts handle all required dependencies.
+Standard CMake build process. CMake version >= 3.23 required. If your Metis build requires GKlib, add `-DLINK_GKLIB=True` to your cmake command when building Jet. Example build scripts are provided for macOS with OpenMP and Linux systems with Cuda. These scripts handle all required dependencies.
 
 ### Executables
 
@@ -30,7 +30,7 @@ jet\_serial: jet but runs on the host on a single thread.
 pstat: Given a metis graph file, partition file, and k-value, will print out quality information on the partition.
 
 ### Using Jet Partitioner in Your Code
-We can not provide an option to compile a library due to the use of templates. However, you can import "jet.hpp" into your code to use the partitioner via the "jet\_partitioner::partition" method. Note that this requires you to add our source directory to your include path and also to link our dependencies. This method currently always uses the default coarsening algorithm.
+We provide a cmake package that you can install on your system. Add `find_package(jet REQUIRED)` in your project's CMakeLists.txt file and link your executable/s to `jet::jet`. Include `jet.h` in your code to use one of the provided partitioning functions. Each function is distinguished by the target Kokkos execution space it will run in and the type of KokkosKernels CrsMatrix which it accepts. Reference `jet_defs.h` for the relevant template definitions of these parameters. You can set the desired part count and imbalance values on the input config_t struct.
 
 ### Input Format
 We do not yet support vertex weights within metis graph files.
