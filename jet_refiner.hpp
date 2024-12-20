@@ -1048,7 +1048,7 @@ conn_data init_conn_data(const conn_data& scratch_cdata, const matrix_t& g, cons
     return cdata;
 }
 
-void jet_refine(const matrix_t g, const config_t& config, wgt_vt vtx_w, part_vt best_part, int level, refine_data& best_state, experiment_data<scalar_t>& experiment){
+void jet_refine(const matrix_t g, const config_t& config, wgt_vt vtx_w, part_vt best_part, bool uniform_ew, refine_data& best_state, experiment_data<scalar_t>& experiment){
     Kokkos::Timer y;
     //contains several scratch views that are reused in each iteration
     //reallocating in each iteration would be expensive (GPU memory is often slow to deallocate)
@@ -1092,7 +1092,7 @@ void jet_refine(const matrix_t g, const config_t& config, wgt_vt vtx_w, part_vt 
     //improvement in cut or balance
     //this accounts for at least 3 full lp+rebalancing cycles
     double filter_ratio = 0.75;
-    if(level == 0) filter_ratio = 0.25;
+    if(uniform_ew) filter_ratio = 0.25;
     while(count++ <= 11){
         iter_count++;
         vtx_vt moves;

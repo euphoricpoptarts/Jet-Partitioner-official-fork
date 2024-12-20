@@ -117,7 +117,7 @@ static part_vt multilevel_jet(std::list<clt> cg_list, part_vt coarse_guess, cons
                 t.reset();
             }
         }
-        refiner.jet_refine(cg.mtx, config, cg.vtx_w, coarse_guess, cg_list.size() - 1, rfd, experiment);
+        refiner.jet_refine(cg.mtx, config, cg.vtx_w, coarse_guess, cg.uniform_weights, rfd, experiment);
         cg_list.pop_back();
         if(!cg_list.empty()){
             clt next_cg = cg_list.back();
