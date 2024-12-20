@@ -117,12 +117,14 @@ static part_vt partition(scalar_t& edge_cut,
     experiment.addMeasurement(Measurement::Coarsen, fin_coarsening_time - start_time);
     experiment.addMeasurement(Measurement::FreeGraph, fin_time - fin_uncoarsening);
     
-    // additional partition statistics
-    experiment.setMaxPartCut(stat::max_part_cut(g, part, k));
-    experiment.setObjective(stat::comm_size(g, part, k));
+    if(config.verbose){
+        // additional partition statistics
+        experiment.setMaxPartCut(stat::max_part_cut(g, part, k));
+        experiment.setObjective(stat::comm_size(g, part, k));
 
-    experiment.refinementReport();
-    experiment.verboseReport();
+        experiment.refinementReport();
+        experiment.verboseReport();
+    }
 
     return part;
 }

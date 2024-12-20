@@ -47,6 +47,7 @@ struct config_t {
     int num_parts = 2;
     double refine_tolerance = 0.999;
     bool dump_coarse = false;
+    bool verbose = false;
 };
 
 }

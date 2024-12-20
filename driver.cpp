@@ -89,6 +89,7 @@ int main(int argc, char **argv) {
 #ifdef EXP
     config.dump_coarse = true;
 #endif
+    config.verbose = true;
 
     Kokkos::initialize();
     //must scope kokkos-related data
