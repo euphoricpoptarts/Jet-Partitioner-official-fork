@@ -78,7 +78,7 @@ part_vt partition(value_t& edge_cut,
     return part;
 }
 
-void degree_weighting(const matrix_t& g, wgt_view_t vweights){
+void degree_weighting(const matrix_t& g, wgt_vt vweights){
     Kokkos::parallel_for("set v weights", r_policy(0, g.numRows()), KOKKOS_LAMBDA(const ordinal_t i){
         vweights(i) = g.graph.row_map(i + 1) - g.graph.row_map(i);
     });

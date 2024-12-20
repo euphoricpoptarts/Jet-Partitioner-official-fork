@@ -47,7 +47,7 @@ namespace jet_partitioner {
 part_vt partition(value_t& edge_cut,
                 const config_t& config,
                 const matrix_t g,
-                const wgt_view_t vweights,
+                const wgt_vt vweights,
                 bool uniform_ew,
                 experiment_data<value_t>& experiment){
     

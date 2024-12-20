@@ -59,9 +59,9 @@ public:
     using ordinal_t = typename matrix_t::ordinal_type;
     using edge_offset_t = typename matrix_t::size_type;
     using scalar_t = typename matrix_t::value_type;
-    using vtx_view_t = Kokkos::View<ordinal_t*, Device>;
-    using wgt_view_t = Kokkos::View<scalar_t*, Device>;
-    using edge_view_t = Kokkos::View<edge_offset_t*, Device>;
+    using vtx_vt = Kokkos::View<ordinal_t*, Device>;
+    using wgt_vt = Kokkos::View<scalar_t*, Device>;
+    using edge_vt = Kokkos::View<edge_offset_t*, Device>;
     using graph_type = typename matrix_t::staticcrsgraph_type;
     using policy_t = Kokkos::RangePolicy<exec_space>;
     using dyn_policy_t = Kokkos::RangePolicy<Kokkos::Schedule<Kokkos::Dynamic>, exec_space>;
@@ -84,16 +84,16 @@ public:
     // interp matrix maps previous level to this level
     struct coarse_level_triple {
         matrix_t mtx;
-        wgt_view_t vtx_w;
+        wgt_vt vtx_w;
         coarse_map interp_mtx;
         int level;
         bool uniform_weights = false;
     };
 
     struct scratch_mem {
-        vtx_view_t htable;
-        wgt_view_t hvals;
-        edge_view_t hrow_map;
+        vtx_vt htable;
+        wgt_vt hvals;
+        edge_vt hrow_map;
     };
 
     // define behavior-controlling enums
@@ -147,16 +147,16 @@ bool should_use_dyn(const ordinal_t n, const Kokkos::View<const edge_offset_t*, 
 struct countingFunctor {
 
     matrix_t g;
-    vtx_view_t vcmap;
-    edge_view_t degree_initial;
-    wgt_view_t c_vtx_w, f_vtx_w;
+    vtx_vt vcmap;
+    edge_vt degree_initial;
+    wgt_vt c_vtx_w, f_vtx_w;
     ordinal_t workLength;
 
     countingFunctor(matrix_t _g,
-            vtx_view_t _vcmap,
-            edge_view_t _degree_initial,
-            wgt_view_t _c_vtx_w,
-            wgt_view_t _f_vtx_w) :
+            vtx_vt _vcmap,
+            edge_vt _degree_initial,
+            wgt_vt _c_vtx_w,
+            wgt_vt _f_vtx_w) :
         g(_g),
         vcmap(_vcmap),
         degree_initial(_degree_initial),
@@ -178,16 +178,16 @@ struct countingFunctor {
 
 struct combineAndDedupe {
     matrix_t g;
-    vtx_view_t vcmap;
-    vtx_view_t htable;
-    wgt_view_t hvals;
-    edge_view_t hrow_map;
+    vtx_vt vcmap;
+    vtx_vt htable;
+    wgt_vt hvals;
+    edge_vt hrow_map;
 
     combineAndDedupe(matrix_t _g,
-            vtx_view_t _vcmap,
-            vtx_view_t _htable,
-            wgt_view_t _hvals,
-            edge_view_t _hrow_map) :
+            vtx_vt _vcmap,
+            vtx_vt _htable,
+            wgt_vt _hvals,
+            edge_vt _hrow_map) :
             g(_g),
             vcmap(_vcmap),
             htable(_htable),
@@ -247,12 +247,12 @@ struct combineAndDedupe {
 };
 
 struct countUnique {
-    vtx_view_t htable;
-    edge_view_t hrow_map, coarse_row_map_f;
+    vtx_vt htable;
+    edge_vt hrow_map, coarse_row_map_f;
 
-    countUnique(vtx_view_t _htable,
-            edge_view_t _hrow_map,
-            edge_view_t _coarse_row_map_f) :
+    countUnique(vtx_vt _htable,
+            edge_vt _hrow_map,
+            edge_vt _coarse_row_map_f) :
             htable(_htable),
             hrow_map(_hrow_map),
             coarse_row_map_f(_coarse_row_map_f) {}
@@ -290,16 +290,16 @@ struct countUnique {
 };
 
 struct consolidateUnique {
-    vtx_view_t htable, entries_coarse;
-    wgt_view_t hvals, wgts_coarse;
-    edge_view_t hrow_map, coarse_row_map_f;
+    vtx_vt htable, entries_coarse;
+    wgt_vt hvals, wgts_coarse;
+    edge_vt hrow_map, coarse_row_map_f;
 
-    consolidateUnique(vtx_view_t _htable,
-            vtx_view_t _entries_coarse,
-            wgt_view_t _hvals,
-            wgt_view_t _wgts_coarse,
-            edge_view_t _hrow_map,
-            edge_view_t _coarse_row_map_f) :
+    consolidateUnique(vtx_vt _htable,
+            vtx_vt _entries_coarse,
+            wgt_vt _hvals,
+            wgt_vt _wgts_coarse,
+            edge_vt _hrow_map,
+            edge_vt _coarse_row_map_f) :
             htable(_htable),
             entries_coarse(_entries_coarse),
             hvals(_hvals),
@@ -354,10 +354,10 @@ coarse_level_triple build_coarse_graph(const coarse_level_triple level,
     ordinal_t nc = vcmap.coarse_vtx;
 
     Kokkos::Timer timer;
-    edge_view_t hrow_map = Kokkos::subview(scratch.hrow_map, std::make_pair(static_cast<ordinal_t>(0), nc + 1));
+    edge_vt hrow_map = Kokkos::subview(scratch.hrow_map, std::make_pair(static_cast<ordinal_t>(0), nc + 1));
     Kokkos::deep_copy(exec_space(), hrow_map, 0);
-    wgt_view_t f_vtx_w = level.vtx_w;
-    wgt_view_t c_vtx_w = wgt_view_t("coarse vertex weights", nc);
+    wgt_vt f_vtx_w = level.vtx_w;
+    wgt_vt c_vtx_w = wgt_vt("coarse vertex weights", nc);
     countingFunctor countF(g, vcmap.map, hrow_map, c_vtx_w, f_vtx_w);
     Kokkos::parallel_for("count edges per coarse vertex (also compute coarse vertex weights)", policy_t(0, n), countF);
     Kokkos::fence();
@@ -375,9 +375,9 @@ coarse_level_triple build_coarse_graph(const coarse_level_triple level,
     Kokkos::fence();
     experiment.addMeasurement(Measurement::Prefix, timer.seconds());
     timer.reset();
-    vtx_view_t htable = Kokkos::subview(scratch.htable, std::make_pair(static_cast<edge_offset_t>(0), hash_size));
+    vtx_vt htable = Kokkos::subview(scratch.htable, std::make_pair(static_cast<edge_offset_t>(0), hash_size));
     Kokkos::deep_copy(exec_space(), htable, NULL_KEY);
-    wgt_view_t hvals = Kokkos::subview(scratch.hvals, std::make_pair(static_cast<edge_offset_t>(0), hash_size));
+    wgt_vt hvals = Kokkos::subview(scratch.hvals, std::make_pair(static_cast<edge_offset_t>(0), hash_size));
     Kokkos::deep_copy(exec_space(), hvals, 0);
     // use thread teams on gpu when graph has decent average degree or very large max degree
     bool use_team = (!is_host_space && (hash_size / n >= 12 || has_large_row(g)));
@@ -398,7 +398,7 @@ coarse_level_triple build_coarse_graph(const coarse_level_triple level,
     Kokkos::fence();
     experiment.addMeasurement(Measurement::Dedupe, timer.seconds());
     timer.reset();
-    edge_view_t coarse_row_map_f("edges_per_source", nc + 1);
+    edge_vt coarse_row_map_f("edges_per_source", nc + 1);
     countUnique cu(htable, hrow_map, coarse_row_map_f);
     if(use_team) {
         Kokkos::parallel_for("count unique", team_policy_t(nc, Kokkos::AUTO), cu);
@@ -418,8 +418,8 @@ coarse_level_triple build_coarse_graph(const coarse_level_triple level,
     Kokkos::fence();
     experiment.addMeasurement(Measurement::Prefix, timer.seconds());
     timer.reset();
-    vtx_view_t entries_coarse(Kokkos::ViewAllocateWithoutInitializing("coarse entries"), hash_size);
-    wgt_view_t wgts_coarse(Kokkos::ViewAllocateWithoutInitializing("coarse weights"), hash_size);
+    vtx_vt entries_coarse(Kokkos::ViewAllocateWithoutInitializing("coarse entries"), hash_size);
+    wgt_vt wgts_coarse(Kokkos::ViewAllocateWithoutInitializing("coarse weights"), hash_size);
     consolidateUnique consolidate(htable, entries_coarse, hvals, wgts_coarse, hrow_map, coarse_row_map_f);
     if(use_team) {
         Kokkos::parallel_for("consolidate", team_policy_t(nc, Kokkos::AUTO).set_scratch_size(0, Kokkos::PerTeam(4*sizeof(ordinal_t))), consolidate);
@@ -446,7 +446,7 @@ coarse_level_triple build_coarse_graph(const coarse_level_triple level,
 }
 
 coarse_map generate_coarse_mapping(const matrix_t g,
-    const wgt_view_t& vtx_w,
+    const wgt_vt& vtx_w,
     bool uniform_weights,
     pool_t& rand_pool,
     experiment_data<scalar_t>& experiment) {
@@ -491,7 +491,7 @@ coarse_map generate_coarse_mapping(const matrix_t g,
     return interpolation_graph;
 }
 
-std::list<coarse_level_triple> generate_coarse_graphs(const matrix_t fine_g, const wgt_view_t vweights, experiment_data<scalar_t>& experiment, bool uniform_eweights = false) {
+std::list<coarse_level_triple> generate_coarse_graphs(const matrix_t fine_g, const wgt_vt vweights, experiment_data<scalar_t>& experiment, bool uniform_eweights = false) {
     std::list<coarse_level_triple> levels;
     coarse_level_triple finest;
     finest.mtx = fine_g;
@@ -502,9 +502,9 @@ std::list<coarse_level_triple> generate_coarse_graphs(const matrix_t fine_g, con
     levels.push_back(finest);
     pool_t rand_pool(std::time(nullptr));
     scratch_mem scratch;
-    scratch.htable = vtx_view_t(Kokkos::view_alloc(Kokkos::WithoutInitializing, "htable scratch"), fine_g.nnz());
-    scratch.hvals = wgt_view_t(Kokkos::view_alloc(Kokkos::WithoutInitializing, "hvals scratch"), fine_g.nnz());
-    scratch.hrow_map = edge_view_t(Kokkos::view_alloc(Kokkos::WithoutInitializing, "hrow_map scratch"), fine_g.numRows() + 1);
+    scratch.htable = vtx_vt(Kokkos::view_alloc(Kokkos::WithoutInitializing, "htable scratch"), fine_g.nnz());
+    scratch.hvals = wgt_vt(Kokkos::view_alloc(Kokkos::WithoutInitializing, "hvals scratch"), fine_g.nnz());
+    scratch.hrow_map = edge_vt(Kokkos::view_alloc(Kokkos::WithoutInitializing, "hrow_map scratch"), fine_g.numRows() + 1);
     while (levels.rbegin()->mtx.numRows() > coarse_vtx_cutoff) {
 
         coarse_level_triple current_level = *levels.rbegin();

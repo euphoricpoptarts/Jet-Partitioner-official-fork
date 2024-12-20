@@ -47,7 +47,7 @@
 
 using namespace jet_partitioner;
 
-void degree_weighting(const matrix_t& g, wgt_view_t vweights){
+void degree_weighting(const matrix_t& g, wgt_vt vweights){
     Kokkos::parallel_for("set v weights", r_policy(0, g.numRows()), KOKKOS_LAMBDA(const ordinal_t i){
         vweights(i) = g.graph.row_map(i + 1) - g.graph.row_map(i);
     });
@@ -99,7 +99,7 @@ int main(int argc, char **argv) {
         bool uniform_ew = false;
         if(!load_metis_graph(g, uniform_ew, filename)) return -1;
         std::cout << "vertices: " << g.numRows() << "; edges: " << g.nnz() / 2 << std::endl;
-        wgt_view_t vweights("vertex weights", g.numRows());
+        wgt_vt vweights("vertex weights", g.numRows());
         Kokkos::deep_copy(vweights, 1);
 
         part_vt best_part;

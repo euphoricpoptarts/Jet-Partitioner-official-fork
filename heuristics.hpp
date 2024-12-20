@@ -65,8 +65,8 @@ public:
     using ordinal_t = typename matrix_t::ordinal_type;
     using edge_offset_t = typename matrix_t::size_type;
     using scalar_t = typename matrix_t::value_type;
-    using vtx_view_t = typename Kokkos::View<ordinal_t*, Device>;
-    using wgt_view_t = typename Kokkos::View<scalar_t*, Device>;
+    using vtx_vt = typename Kokkos::View<ordinal_t*, Device>;
+    using wgt_vt = typename Kokkos::View<scalar_t*, Device>;
     using policy_t = typename Kokkos::RangePolicy<exec_space>;
     using team_policy_t = typename Kokkos::TeamPolicy<exec_space>;
     using member = typename team_policy_t::member_type;
@@ -82,20 +82,20 @@ public:
 
     struct coarse_map {
         ordinal_t coarse_vtx;
-        vtx_view_t map;
+        vtx_vt map;
     };
 
     //hn is a list of vertices such that vertex i wants to aggregate with vertex hn(i)
-    ordinal_t parallel_map_construct(vtx_view_t vcmap, const ordinal_t n, const vtx_view_t vperm, const vtx_view_t hn) {
+    ordinal_t parallel_map_construct(vtx_vt vcmap, const ordinal_t n, const vtx_vt vperm, const vtx_vt hn) {
 
         ordinal_t perm_length = n;
         Kokkos::View<ordinal_t, Device> nvertices_coarse("nvertices");
 
         //construct mapping using heaviest edges
         int swap = 1;
-        vtx_view_t curr_perm = vperm;
+        vtx_vt curr_perm = vperm;
         while (perm_length > 0) {
-            vtx_view_t next_perm("next perm", perm_length);
+            vtx_vt next_perm("next perm", perm_length);
             Kokkos::View<ordinal_t, Device> next_length("next_length");
 
             Kokkos::parallel_for(policy_t(0, perm_length), KOKKOS_LAMBDA(ordinal_t i) {
@@ -169,16 +169,16 @@ public:
     }
 
     coarse_map coarsen_HEC(const matrix_t& g,
-        const wgt_view_t& vtx_w,
+        const wgt_vt& vtx_w,
         bool uniform_weights,
         pool_t& rand_pool,
         experiment_data<scalar_t>& experiment) {
 
         ordinal_t n = g.numRows();
 
-        vtx_view_t hn("heavies", n);
+        vtx_vt hn("heavies", n);
 
-        vtx_view_t vcmap("vcmap", n);
+        vtx_vt vcmap("vcmap", n);
 
         Kokkos::parallel_for("initialize vcmap", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t i) {
             vcmap(i) = ORD_MAX;
@@ -186,7 +186,7 @@ public:
 
         Kokkos::Timer timer;
 
-        vtx_view_t vperm("vperm", n);
+        vtx_vt vperm("vperm", n);
         Kokkos::parallel_for("initialize vperm", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t i) {
             vperm(i) = i;
         });
@@ -261,7 +261,7 @@ public:
         return out;
     }
 
-    ordinal_t countUnmatched(vtx_view_t target) {
+    ordinal_t countUnmatched(vtx_vt target) {
         ordinal_t total = 0;
 
         Kokkos::parallel_reduce("count unmatched", policy_t(0, target.extent(0)), KOKKOS_LAMBDA(ordinal_t i, ordinal_t& update) {
@@ -274,10 +274,10 @@ public:
     }
 
     template<typename hash_t>
-    void matchHash(const vtx_view_t unmappedVtx, const Kokkos::View<hash_t*, Device> hashes, const hash_t nullkey, vtx_view_t vcmap){
+    void matchHash(const vtx_vt unmappedVtx, const Kokkos::View<hash_t*, Device> hashes, const hash_t nullkey, vtx_vt vcmap){
         ordinal_t mappable = unmappedVtx.extent(0);
         Kokkos::View<hash_t*, Device> htable(Kokkos::ViewAllocateWithoutInitializing("hashes hash table"), mappable);
-        vtx_view_t twins(Kokkos::ViewAllocateWithoutInitializing("twin table"), mappable);
+        vtx_vt twins(Kokkos::ViewAllocateWithoutInitializing("twin table"), mappable);
         Kokkos::deep_copy(htable, nullkey);
         Kokkos::deep_copy(twins, -1);
         Kokkos::parallel_for("match by hash", policy_t(0, mappable), KOKKOS_LAMBDA(const ordinal_t x){
@@ -321,18 +321,18 @@ public:
     template<bool is_initial, bool is_uniform>
     struct pickMatch {
         matrix_t g;
-        vtx_view_t vcmap;
-        vtx_view_t hn;
+        vtx_vt vcmap;
+        vtx_vt hn;
         pool_t rand_pool;
-        vtx_view_t vperm;
+        vtx_vt vperm;
         ordinal_t n;
         ordinal_t perm_length;
 
         pickMatch(matrix_t _g,
-            vtx_view_t _vcmap,
-            vtx_view_t _hn,
+            vtx_vt _vcmap,
+            vtx_vt _hn,
             pool_t _rand_pool,
-            vtx_view_t _vperm,
+            vtx_vt _vperm,
             ordinal_t _n,
             ordinal_t _perm_length) :
                 g(_g),
@@ -430,12 +430,12 @@ public:
 
         ordinal_t n = g.numRows();
 
-        vtx_view_t hn(Kokkos::ViewAllocateWithoutInitializing("heavies"), n);
-        vtx_view_t vcmap(Kokkos::ViewAllocateWithoutInitializing("vcmap"), n);
+        vtx_vt hn(Kokkos::ViewAllocateWithoutInitializing("heavies"), n);
+        vtx_vt vcmap(Kokkos::ViewAllocateWithoutInitializing("vcmap"), n);
         Kokkos::deep_copy(hn, ORD_MAX);
         Kokkos::deep_copy(vcmap, ORD_MAX);
-        vtx_view_t vperm_scratch(Kokkos::ViewAllocateWithoutInitializing("vperm"), n);
-        vtx_view_t vperm = vperm_scratch;
+        vtx_vt vperm_scratch(Kokkos::ViewAllocateWithoutInitializing("vperm"), n);
+        vtx_vt vperm = vperm_scratch;
 
         if (uniform_weights) {
             //all weights equal at this level so choose heaviest edge randomly
@@ -458,7 +458,7 @@ public:
         }
         ordinal_t perm_length = n;
         //construct mapping using heaviest edges
-        vtx_view_t perm_scratch(Kokkos::ViewAllocateWithoutInitializing("next perm"), n);
+        vtx_vt perm_scratch(Kokkos::ViewAllocateWithoutInitializing("next perm"), n);
         while (perm_length > 0) {
             //std::cout << "Remaining vtx: " << perm_length << std::endl;
             //match vertices with vertex given by hn
@@ -515,7 +515,7 @@ public:
                     Kokkos::parallel_for("Potential matches (heavy)", policy_t(0, perm_length), matcher);
                 }
             }
-            vtx_view_t perm = perm_scratch;
+            vtx_vt perm = perm_scratch;
             if(perm_length != n){
                 perm = Kokkos::subview(perm_scratch, std::make_pair((ordinal_t)0, perm_length));
                 Kokkos::deep_copy(exec_space(), perm, vperm);
@@ -538,7 +538,7 @@ public:
 
             //leaf matches
             if (unmappedRatio > 0.25) {
-                vtx_view_t unmappedVtx(Kokkos::ViewAllocateWithoutInitializing("unmapped vertices"), unmapped);
+                vtx_vt unmappedVtx(Kokkos::ViewAllocateWithoutInitializing("unmapped vertices"), unmapped);
                 ordinal_t mappable;
                 Kokkos::parallel_scan("scan unmapped", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
                     if(vcmap(i) == ORD_MAX && g.graph.row_map(i+1) - g.graph.row_map(i) == 1){
@@ -549,7 +549,7 @@ public:
                     }
                 }, mappable);
                 unmappedVtx = Kokkos::subview(unmappedVtx, std::make_pair((ordinal_t)0, mappable));
-                vtx_view_t hashes(Kokkos::ViewAllocateWithoutInitializing("hashes"), mappable);
+                vtx_vt hashes(Kokkos::ViewAllocateWithoutInitializing("hashes"), mappable);
                 Kokkos::parallel_for("create digests", policy_t(0, mappable), KOKKOS_LAMBDA(ordinal_t i) {
                     ordinal_t u = unmappedVtx(i);
                     ordinal_t v = g.graph.entries(g.graph.row_map(u));
@@ -564,7 +564,7 @@ public:
 
             //twin matches
             if (unmappedRatio > 0.25) {
-                vtx_view_t unmappedVtx(Kokkos::ViewAllocateWithoutInitializing("unmapped vertices"), unmapped);
+                vtx_vt unmappedVtx(Kokkos::ViewAllocateWithoutInitializing("unmapped vertices"), unmapped);
                 Kokkos::View<uint64_t*, Device> hashes(Kokkos::ViewAllocateWithoutInitializing("hashes"), unmapped);
                 Kokkos::parallel_scan("scan unmapped", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
                     if(vcmap(i) == ORD_MAX){
@@ -601,7 +601,7 @@ public:
 
             //relative matches
             if (unmappedRatio > 0.25) {
-                vtx_view_t unmappedVtx(Kokkos::ViewAllocateWithoutInitializing("unmapped vertices"), unmapped);
+                vtx_vt unmappedVtx(Kokkos::ViewAllocateWithoutInitializing("unmapped vertices"), unmapped);
                 ordinal_t mappable;
                 Kokkos::parallel_scan("scan unmapped", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
                     if(vcmap(i) == ORD_MAX){
@@ -611,7 +611,7 @@ public:
                         update++;
                     }
                 }, mappable);
-                vtx_view_t hashes(Kokkos::ViewAllocateWithoutInitializing("hashes"), mappable);
+                vtx_vt hashes(Kokkos::ViewAllocateWithoutInitializing("hashes"), mappable);
                 Kokkos::parallel_for("create digests", policy_t(0, mappable), KOKKOS_LAMBDA(ordinal_t i) {
                     ordinal_t u = unmappedVtx(i);
                     ordinal_t h = ORD_MAX;

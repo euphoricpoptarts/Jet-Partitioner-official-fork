@@ -62,7 +62,7 @@ int main(int argc, char **argv) {
         bool uniform_ew = false;
         if(!load_metis_graph(g, uniform_ew, filename)) return -1;
         std::cout << "vertices: " << g.numRows() << "; edges: " << g.nnz() / 2 << std::endl;
-        wgt_view_t vweights("vertex weights", g.numRows());
+        wgt_vt vweights("vertex weights", g.numRows());
         Kokkos::deep_copy(vweights, 1);
 
         part_vt part = load_part(g.numRows(), part_file);

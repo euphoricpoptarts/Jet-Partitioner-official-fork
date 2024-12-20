@@ -50,7 +50,7 @@ public:
     using Device = typename matrix_t::device_type;
     using ordinal_t = typename matrix_t::ordinal_type;
     using scalar_t = typename matrix_t::value_type;
-    using wgt_view_t = Kokkos::View<scalar_t*, Device>;
+    using wgt_vt = Kokkos::View<scalar_t*, Device>;
     using part_vt = Kokkos::View<part_t*, Device>;
     using coarsener_t = contracter<matrix_t>;
     using init_t = initial_partitioner<matrix_t, part_t>;
@@ -60,7 +60,7 @@ public:
 static part_vt partition(scalar_t& edge_cut,
                                   const config_t& config,
                                   const matrix_t g,
-                                  const wgt_view_t vweights,
+                                  const wgt_vt vweights,
                                   bool uniform_ew,
                                   experiment_data<scalar_t>& experiment) {
 

@@ -57,9 +57,9 @@ public:
     using Device = typename matrix_t::device_type;
     using ordinal_t = typename matrix_t::ordinal_type;
     using scalar_t = typename matrix_t::value_type;
-    using vtx_view_t = Kokkos::View<ordinal_t*, Device>;
-    using wgt_view_t = Kokkos::View<scalar_t*, Device>;
-    using wgt_mirror_t = typename wgt_view_t::HostMirror;
+    using vtx_vt = Kokkos::View<ordinal_t*, Device>;
+    using wgt_vt = Kokkos::View<scalar_t*, Device>;
+    using wgt_mt = typename wgt_vt::HostMirror;
     using part_vt = Kokkos::View<part_t*, Device>;
     using part_mt = typename part_vt::HostMirror;
     using metis_int = int;
@@ -89,14 +89,14 @@ static metis_mt to_metis_int(src_vt src){
     return data;
 }
 
-static part_vt metis_init(matrix_t g, wgt_view_t vtx_w, int k, double imb_ratio){
+static part_vt metis_init(matrix_t g, wgt_vt vtx_w, int k, double imb_ratio){
     int n = g.numRows();
     metis_vt part_metis("part metis type", n);
     metis_mt pm = Kokkos::create_mirror_view(part_metis);
-    metis_mt vtx_wm = to_metis_int<wgt_view_t>(vtx_w);
+    metis_mt vtx_wm = to_metis_int<wgt_vt>(vtx_w);
     metis_mt xadj = to_metis_int<typename matrix_t::row_map_type>(g.graph.row_map);
-    metis_mt adjcwgt = to_metis_int<wgt_view_t>(g.values);
-    metis_mt adjncy = to_metis_int<vtx_view_t>(g.graph.entries);
+    metis_mt adjcwgt = to_metis_int<wgt_vt>(g.values);
+    metis_mt adjncy = to_metis_int<vtx_vt>(g.graph.entries);
     real_t imbalance = imb_ratio;
     int ec = 0;
     int nweights = 1;
@@ -113,7 +113,7 @@ static part_vt metis_init(matrix_t g, wgt_view_t vtx_w, int k, double imb_ratio)
     return part;
 }
 
-static part_vt random_init(wgt_view_t vtx_w, int k, double imb_ratio){
+static part_vt random_init(wgt_vt vtx_w, int k, double imb_ratio){
     ordinal_t n = vtx_w.extent(0);
     scalar_t total = 0;
     Kokkos::parallel_reduce("sum vtx", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i, scalar_t& update){
@@ -121,11 +121,11 @@ static part_vt random_init(wgt_view_t vtx_w, int k, double imb_ratio){
     }, total);
     scalar_t opt = total / k;
     scalar_t upper = opt * imb_ratio;
-    wgt_mirror_t vw = Kokkos::create_mirror_view(vtx_w);
+    wgt_mt vw = Kokkos::create_mirror_view(vtx_w);
     Kokkos::deep_copy(vw, vtx_w);
     part_vt part_dev("part device", n);
     part_mt part = Kokkos::create_mirror_view(part_dev);
-    wgt_mirror_t psizes("part sizes", k);
+    wgt_mt psizes("part sizes", k);
     std::random_device rd;
     std::mt19937 rg(rd());
     std::uniform_int_distribution<> range(0, k-1);

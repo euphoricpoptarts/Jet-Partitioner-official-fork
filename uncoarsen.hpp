@@ -62,7 +62,7 @@ public:
     using Device = typename matrix_t::device_type;
     using ordinal_t = typename matrix_t::ordinal_type;
     using scalar_t = typename matrix_t::value_type;
-    using vtx_view_t = Kokkos::View<ordinal_t*, Device>;
+    using vtx_vt = Kokkos::View<ordinal_t*, Device>;
     using part_vt = Kokkos::View<part_t*, Device>;
     using policy_t = Kokkos::RangePolicy<exec_space>;
     using coarsener_t = contracter<matrix_t>;
@@ -86,7 +86,7 @@ static double get_max_imb(gain_vt part_sizes, part_t k){
     return static_cast<double>(imb) / static_cast<double>(stat::optimal_size(fine_n, k));
 }
 
-static void project(ordinal_t fine_n, vtx_view_t map, part_vt input, part_vt output){
+static void project(ordinal_t fine_n, vtx_vt map, part_vt input, part_vt output){
     Kokkos::parallel_for("project", policy_t(0, fine_n), KOKKOS_LAMBDA(const ordinal_t i){
         output(i) = input(map(i));
     });
