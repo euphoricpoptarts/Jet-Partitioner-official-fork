@@ -48,6 +48,7 @@ struct config_t {
     double refine_tolerance = 0.999;
     bool dump_coarse = false;
     bool verbose = false;
+    bool ultra_settings = false;
 };
 
 }

@@ -39,8 +39,7 @@
 #pragma once
 #include <type_traits>
 #include <limits>
-#include <iostream>
-#include <iomanip>
+#include <vector>
 #include <Kokkos_Core.hpp>
 #include "KokkosSparse_CrsMatrix.hpp"
 #include "experiment_data.hpp"
@@ -1081,46 +1080,56 @@ void jet_refine(const matrix_t g, const config_t& config, wgt_vt vtx_w, part_vt 
     part_vt part(Kokkos::ViewAllocateWithoutInitializing("current partition"), g.numRows());
     Kokkos::deep_copy(exec_space(), part, best_part);
     conn_data cdata = init_conn_data(perm_cdata, g, part, k);
-    int count = 0;
     int iter_count = 0;
     Kokkos::fence();
     Kokkos::Timer iter_t;
     int balance_counter = 0;
     int lab_counter = 0;
     double tol = config.refine_tolerance;
+    std::vector<double> temps;
+    if(config.ultra_settings){
+        for(double t = 0.85; t > 0; t -= 0.05){
+            temps.push_back(t);
+        }
+    } else if(uniform_ew) {
+        temps.push_back(0.25);
+    } else {
+        temps.push_back(0.75);
+    }
     //repeat until 12 phases since a significant
     //improvement in cut or balance
     //this accounts for at least 3 full lp+rebalancing cycles
-    double filter_ratio = 0.75;
-    if(uniform_ew) filter_ratio = 0.25;
-    while(count++ <= 11){
-        iter_count++;
-        vtx_vt moves;
-        if(curr_state.total_imb <= imb_max){
-            moves = jet_lp(prob, part, cdata, scratch, filter_ratio);
-            balance_counter = 0;
-            lab_counter++;
-        } else {
-            if(balance_counter < 2){
-                moves = rebalance_weak(prob, part, cdata, scratch, curr_state.part_sizes);
+    for(double filter_ratio : temps){
+        int count = 0;
+        while(count++ <= 11){
+            iter_count++;
+            vtx_vt moves;
+            if(curr_state.total_imb <= imb_max){
+                moves = jet_lp(prob, part, cdata, scratch, filter_ratio);
+                balance_counter = 0;
+                lab_counter++;
             } else {
-                moves = rebalance_strong(prob, part, cdata, scratch, curr_state.part_sizes);
+                if(balance_counter < 2){
+                    moves = rebalance_weak(prob, part, cdata, scratch, curr_state.part_sizes);
+                } else {
+                    moves = rebalance_strong(prob, part, cdata, scratch, curr_state.part_sizes);
+                }
+                balance_counter++;
             }
-            balance_counter++;
-        }
-        perform_moves(prob, part, moves, scratch.dest_part, scratch, cdata, curr_state);
-        //copy current partition and relevant data to output partition if following conditions pass
-        if(best_state.total_imb > imb_max && curr_state.total_imb < best_state.total_imb){
-            copy_refine_data(best_state, curr_state);
-            Kokkos::deep_copy(exec_space(), best_part, part);
-            count = 0;
-        } else if(curr_state.cut < best_state.cut && (curr_state.total_imb <= imb_max || curr_state.total_imb <= best_state.total_imb)){
-            //do not reset counter if cut improvement is too small
-            if(curr_state.cut < tol*best_state.cut){
+            perform_moves(prob, part, moves, scratch.dest_part, scratch, cdata, curr_state);
+            //copy current partition and relevant data to output partition if following conditions pass
+            if(best_state.total_imb > imb_max && curr_state.total_imb < best_state.total_imb){
+                copy_refine_data(best_state, curr_state);
+                Kokkos::deep_copy(exec_space(), best_part, part);
                 count = 0;
+            } else if(curr_state.cut < best_state.cut && (curr_state.total_imb <= imb_max || curr_state.total_imb <= best_state.total_imb)){
+                //do not reset counter if cut improvement is too small
+                if(curr_state.cut < tol*best_state.cut){
+                    count = 0;
+                }
+                copy_refine_data(best_state, curr_state);
+                Kokkos::deep_copy(exec_space(), best_part, part);
             }
-            copy_refine_data(best_state, curr_state);
-            Kokkos::deep_copy(exec_space(), best_part, part);
         }
     }
     Kokkos::fence();
