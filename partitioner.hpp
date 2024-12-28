@@ -56,6 +56,7 @@ public:
     using init_t = initial_partitioner<matrix_t, part_t>;
     using uncoarsener_t = uncoarsener<matrix_t, part_t>;
     using coarse_level_triple = typename coarsener_t::coarse_level_triple;
+    using stat = part_stat<matrix_t, part_t>;
 
 static part_vt partition(scalar_t& edge_cut,
                                   const config_t& config,
@@ -64,14 +65,8 @@ static part_vt partition(scalar_t& edge_cut,
                                   bool uniform_ew,
                                   experiment_data<scalar_t>& experiment) {
 
-    using coarsener_t = contracter<matrix_t>;
-    using init_t = initial_partitioner<matrix_t, part_t>;
-    using uncoarsener_t = uncoarsener<matrix_t, part_t>;
-    using coarse_level_triple = typename coarsener_t::coarse_level_triple;
-    using stat = part_stat<matrix_t, part_t>;
     coarsener_t coarsener;
 
-    std::list<coarse_level_triple> cg_list;
     Kokkos::fence();
     Kokkos::Timer t;
     double start_time = t.seconds();
@@ -97,7 +92,7 @@ static part_vt partition(scalar_t& edge_cut,
     }
     coarsener.set_coarse_vtx_cutoff(cutoff);
     coarsener.set_min_allowed_vtx(cutoff / 4);
-    cg_list = coarsener.generate_coarse_graphs(g, vweights, experiment, uniform_ew);
+    std::list<coarse_level_triple> cg_list = coarsener.generate_coarse_graphs(g, vweights, experiment, uniform_ew);
     Kokkos::fence();
     double fin_coarsening_time = t.seconds();
     double imb_ratio = config.max_imb_ratio;
