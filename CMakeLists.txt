@@ -14,11 +14,11 @@ find_package(KokkosKernels REQUIRED)
 add_compile_options(-Wall -Wextra -Wshadow)
 
 # libjet
-add_library(jet STATIC jet.cpp)
+add_library(jet STATIC src/jet.cpp)
 target_sources(jet PUBLIC
   FILE_SET HEADERS
-  FILES jet.h jet_defs.h jet_config.h experiment_data.hpp
-)
+  FILES header/jet.h header/jet_defs.h header/jet_config.h header/experiment_data.hpp)
+include_directories(header)
 
 if(DEFINED METIS_DIR)
 # This is used by the build script
@@ -37,15 +37,17 @@ target_link_libraries(jet PRIVATE GKlib)
 endif()
 
 # jet executables
-add_executable(jet_ex driver.cpp)
+add_executable(jet_ex app/driver.cpp)
 set_property(TARGET jet_ex PROPERTY OUTPUT_NAME jet)
-add_executable(jet4 driver.cpp)
-add_executable(jet2 driver.cpp)
-add_executable(jet_host driver.cpp)
-add_executable(jet_import import_coarse.cpp)
-add_executable(jet_export driver.cpp)
-add_executable(jet_serial driver.cpp)
-add_executable(pstat part_eval.cpp)
+add_executable(jet4 app/driver.cpp)
+add_executable(jet2 app/driver.cpp)
+add_executable(jet_host app/driver.cpp)
+add_executable(jet_import app/import_coarse.cpp)
+add_executable(jet_export app/driver.cpp)
+add_executable(jet_serial app/driver.cpp)
+add_executable(pstat app/part_eval.cpp)
+target_include_directories(jet_import PUBLIC src)
+target_include_directories(pstat PUBLIC src)
 
 # compile definitions to set exe behavior
 target_compile_definitions(jet4 PUBLIC FOUR9)

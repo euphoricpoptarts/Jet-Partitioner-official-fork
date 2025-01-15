@@ -44,6 +44,72 @@
 
 using namespace jet_partitioner;
 
+//loads a sequence of coarse graphs and mappings between each graph from binary file
+//used to control for coarsening when experimenting with refinement
+std::list<typename jet_partitioner::contracter<matrix_t>::coarse_level_triple> load_coarse(){
+    using coarse_level_triple = typename jet_partitioner::contracter<matrix_t>::coarse_level_triple;
+    std::list<coarse_level_triple> levels;
+    std::list<coarse_level_triple> error_levels;
+    FILE* cgfp = fopen("coarse_graphs.out", "r");
+    int size = 0;
+    if(fread(&size, sizeof(int), 1, cgfp) != 1) return error_levels;
+    std::cout << "Importing " << size << " coarsened graphs" << std::endl;
+    ordinal_t prev_n = 0;
+    for(int i = 0; i < size; i++){
+        coarse_level_triple level;
+        level.level = i + 1;
+        ordinal_t N = 0;
+        if(fread(&N, sizeof(ordinal_t), 1, cgfp) != 1)  return error_levels;
+        edge_offset_t M = 0;
+        if(fread(&M, sizeof(edge_offset_t), 1, cgfp) != 1) return error_levels;
+        edge_vt rows("rows", N + 1);
+        auto rows_m = Kokkos::create_mirror_view(rows);
+        if(fread(rows_m.data(), sizeof(edge_offset_t), N + 1, cgfp) != static_cast<size_t>(N + 1)) return error_levels;
+        Kokkos::deep_copy(rows, rows_m);
+        vtx_vt entries("entries", M);
+        auto entries_m = Kokkos::create_mirror_view(entries);
+        if(fread(entries_m.data(), sizeof(ordinal_t), M, cgfp) != static_cast<size_t>(M)) return error_levels;
+        Kokkos::deep_copy(entries, entries_m);
+        wgt_vt values("values", M);
+        auto values_m = Kokkos::create_mirror_view(values);
+        if(fread(values_m.data(), sizeof(value_t), M, cgfp) != static_cast<size_t>(M))  return error_levels;
+        Kokkos::deep_copy(values, values_m);
+        graph_t graph(entries, rows);
+        matrix_t g("g", N, values, graph);
+        level.mtx = g;
+        wgt_vt vtx_wgts("vtx wgts", N);
+        auto vtx_wgts_m = Kokkos::create_mirror_view(vtx_wgts);
+        if(fread(vtx_wgts_m.data(), sizeof(value_t), N, cgfp) != static_cast<size_t>(N)) return error_levels;
+        Kokkos::deep_copy(vtx_wgts, vtx_wgts_m);
+        level.vtx_w = vtx_wgts;
+        if(level.level > 1){
+            vtx_vt i_entries("entries", prev_n);
+            auto i_entries_m = Kokkos::create_mirror_view(i_entries);
+            if(fread(i_entries_m.data(), sizeof(ordinal_t), prev_n, cgfp) != static_cast<size_t>(prev_n)) return error_levels;
+            Kokkos::deep_copy(i_entries, i_entries_m);
+            typename jet_partitioner::contracter<matrix_t>::coarse_map i_g;
+            i_g.coarse_vtx = N;
+            i_g.map = i_entries;
+            level.interp_mtx = i_g;
+        }
+        prev_n = N;
+        levels.push_back(level);
+    }
+    fclose(cgfp);
+    return levels;
+}
+
+//reads part from binary file
+part_vt load_coarse_part(ordinal_t n){
+    FILE* cgfp = fopen("coarse_part.out", "r");
+    part_vt part("part", n);
+    auto part_m = Kokkos::create_mirror_view(part);
+    if(fread(part_m.data(), sizeof(part_t), n, cgfp) != static_cast<size_t>(n)) return part;
+    Kokkos::deep_copy(part, part_m);
+    fclose(cgfp);
+    return part;
+}
+
 part_vt partition(value_t& edge_cut,
                     const config_t& config,
                     experiment_data<value_t>& experiment) {

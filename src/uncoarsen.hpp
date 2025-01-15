@@ -39,13 +39,6 @@
 #include "jet_refiner.hpp"
 #include "contract.hpp"
 #include "jet_config.h"
-#include <limits>
-#include <cstdlib>
-#include <cmath>
-#include <utility>
-#include <numeric>
-#include <iostream>
-#include <iomanip>
 #include <Kokkos_Core.hpp>
 #include "KokkosSparse_CrsMatrix.hpp"
 #include "part_stat.hpp"

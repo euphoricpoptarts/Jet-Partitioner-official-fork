@@ -38,9 +38,6 @@
 // ************************************************************************
 #pragma once
 #include <type_traits>
-#include <limits>
-#include <iostream>
-#include <iomanip>
 #include <Kokkos_Core.hpp>
 #include "KokkosSparse_CrsMatrix.hpp"
 #include "experiment_data.hpp"
