@@ -26,7 +26,6 @@ endif()
 
 # link libjet (for downstream library consumers)
 # no linking actually occurs for libjet itself
-find_package(KokkosKernels REQUIRED)
 target_link_libraries(jet PUBLIC Kokkos::kokkos Kokkos::kokkoskernels)
 target_link_libraries(jet PRIVATE ${LIBMETIS})
 if(LINK_GKLIB)

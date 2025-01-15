@@ -25,9 +25,9 @@ target_compile_definitions(jet_export PUBLIC HOST EXP)
 target_compile_definitions(jet_serial PUBLIC SERIAL)
 
 # link executables
-find_package(KokkosKernels REQUIRED)
 target_link_libraries(jet_import Kokkos::kokkos Kokkos::kokkoskernels)
 target_link_libraries(pstat Kokkos::kokkos Kokkos::kokkoskernels)
+# other executables get the kokkos dependencies via jet
 foreach(prog jet_ex jet4 jet2 jet_host jet_export jet_serial)
     target_link_libraries(${prog} jet)
 endforeach(prog)

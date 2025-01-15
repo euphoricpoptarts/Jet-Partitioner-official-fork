@@ -6,6 +6,9 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
+# both the apps and the library depend on kokkos and kokkoskernels
+# find KokkosKernels also handles kokkos
+find_package(KokkosKernels REQUIRED)
 add_compile_options(-Wall -Wextra -Wshadow)
 add_subdirectory(src)
 add_subdirectory(app)
