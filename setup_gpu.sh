@@ -43,5 +43,5 @@ cd build
 #you need to have cmake version at least 3.23 for our build
 cmake $ipwd -DCMAKE_PREFIX_PATH=$loc/install/kokkos-kernels/lib/cmake/KokkosKernels \
 -DCMAKE_BUILD_TYPE=Release \
--DLINK_GKLIB=True -DMETIS_DIR="$loc/local" -DCMAKE_INSTALL_PREFIX="$ipwd/install"
+-DLINK_GKLIB=True -DMETIS_HINT="$loc/local" -DCMAKE_INSTALL_PREFIX="$ipwd/install"
 make -j

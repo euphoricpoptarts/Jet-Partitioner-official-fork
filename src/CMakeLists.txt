@@ -11,21 +11,26 @@ target_sources(jet PUBLIC
   FILES ${CMAKE_SOURCE_DIR}/header/jet.h ${CMAKE_SOURCE_DIR}/header/jet_defs.h ${CMAKE_SOURCE_DIR}/header/jet_config.h ${CMAKE_SOURCE_DIR}/header/experiment_data.hpp)
 target_include_directories(jet PRIVATE ${CMAKE_SOURCE_DIR}/header)
 
-if(DEFINED METIS_DIR)
+if(DEFINED METIS_HINT)
 # This is used by the build script
 # to avoid putting metis and gklib in the global path
-target_include_directories(jet PRIVATE ${METIS_DIR}/include)
-# downstream targets need to know about these link directories
-target_link_directories(jet INTERFACE ${METIS_DIR}/lib)
+target_include_directories(jet PRIVATE ${METIS_HINT}/include)
+endif()
+
+# find metis and GKlib using optional hint
+# did you know that find_library doesn't search the LD_LIBRARY_PATH?
+find_library(LIBMETIS metis HINTS ${METIS_HINT}/lib REQUIRED)
+if(LINK_GKLIB)
+find_library(LIBGKLIB GKlib HINTS ${METIS_HINT}/lib REQUIRED)
 endif()
 
 # link libjet (for downstream library consumers)
 # no linking actually occurs for libjet itself
 find_package(KokkosKernels REQUIRED)
 target_link_libraries(jet PUBLIC Kokkos::kokkos Kokkos::kokkoskernels)
-target_link_libraries(jet PRIVATE metis)
+target_link_libraries(jet PRIVATE ${LIBMETIS})
 if(LINK_GKLIB)
-target_link_libraries(jet PRIVATE GKlib)
+target_link_libraries(jet PRIVATE ${LIBGKLIB})
 endif()
 
 # install jetlib and create cmake package
