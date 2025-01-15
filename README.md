@@ -2,7 +2,7 @@
 
 The Jet Partitioner is a parallel graph partitioner that runs on most CPU and GPU systems (via Kokkos, a required dependency).
 This partitioner was developed in a collaboration between Sandia National Labs and Pennsylvania State University.
-For details about the algorithm, please see https://arxiv.org/abs/2304.13194 
+For details about the algorithm, please see https://arxiv.org/abs/2304.13194  
 If you intend to cite this partitioner in a publication, please cite https://doi.org/10.1137/23M1559129
 
 ## Dependencies
