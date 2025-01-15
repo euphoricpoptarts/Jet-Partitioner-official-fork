@@ -15,13 +15,14 @@ if(DEFINED METIS_HINT)
 # This is used by the build script
 # to avoid putting metis and gklib in the global path
 target_include_directories(jet PRIVATE ${METIS_HINT}/include)
+set(METIS_LINK_HINT ${METIS_HINT}/lib)
 endif()
 
 # find metis and GKlib using optional hint
 # did you know that find_library doesn't search the LD_LIBRARY_PATH?
-find_library(LIBMETIS metis HINTS ${METIS_HINT}/lib REQUIRED)
+find_library(LIBMETIS metis HINTS ${METIS_LINK_HINT} REQUIRED)
 if(LINK_GKLIB)
-find_library(LIBGKLIB GKlib HINTS ${METIS_HINT}/lib REQUIRED)
+find_library(LIBGKLIB GKlib HINTS ${METIS_LINK_HINT} REQUIRED)
 endif()
 
 # link libjet (for downstream library consumers)
