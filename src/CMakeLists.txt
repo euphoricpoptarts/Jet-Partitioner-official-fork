@@ -4,7 +4,7 @@
 SET(LINK_GKLIB False CACHE BOOL "Newer Metis distributions require us to link GKlib")
 
 # libjet
-add_library(jet STATIC jet.cpp)
+add_library(jet STATIC jet.cpp jet_big.cpp jet_biggest.cpp)
 target_sources(jet PUBLIC
   FILE_SET HEADERS
   BASE_DIRS ${CMAKE_SOURCE_DIR}/header

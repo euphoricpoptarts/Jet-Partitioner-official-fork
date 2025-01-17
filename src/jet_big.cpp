@@ -44,34 +44,34 @@
 
 namespace jet_partitioner {
 
-part_vt partition(value_t& edge_cut,
+part_vt partition_big(big_val_t& edge_cut,
                 const config_t& config,
-                const matrix_t g,
-                const wgt_vt vweights,
+                const big_matrix_t g,
+                const big_wgt_vt vweights,
                 bool uniform_ew,
-                experiment_data<value_t>& experiment){
-    
-    return partitioner<matrix_t, part_t>::partition(edge_cut, config, g, vweights, uniform_ew, experiment);
+                experiment_data<big_val_t>& experiment){
+
+    return partitioner<big_matrix_t, part_t>::partition(edge_cut, config, g, vweights, uniform_ew, experiment);
 }
 
-part_mt partition_host(value_t& edge_cut,
+part_mt partition_host_big(big_val_t& edge_cut,
                 const config_t& config,
-                const host_matrix_t g,
-                const wgt_host_vt vweights,
+                const big_host_matrix_t g,
+                const big_wgt_host_vt vweights,
                 bool uniform_ew,
-                experiment_data<value_t>& experiment){
+                experiment_data<big_val_t>& experiment){
 
-    return partitioner<host_matrix_t, part_t>::partition(edge_cut, config, g, vweights, uniform_ew, experiment);
+    return partitioner<big_host_matrix_t, part_t>::partition(edge_cut, config, g, vweights, uniform_ew, experiment);
 }
 
-part_mt partition_serial(value_t& edge_cut,
+part_mt partition_serial_big(big_val_t& edge_cut,
                 const config_t& config,
-                const serial_matrix_t g,
-                const wgt_serial_vt vweights,
+                const big_serial_matrix_t g,
+                const big_wgt_serial_vt vweights,
                 bool uniform_ew,
-                experiment_data<value_t>& experiment){
-    
-    return partitioner<serial_matrix_t, part_t>::partition(edge_cut, config, g, vweights, uniform_ew, experiment);
+                experiment_data<big_val_t>& experiment){
+
+    return partitioner<big_serial_matrix_t, part_t>::partition(edge_cut, config, g, vweights, uniform_ew, experiment);
 }
 
 }
