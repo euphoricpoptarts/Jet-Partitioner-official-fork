@@ -45,6 +45,7 @@
 #include "KokkosKernels_Uniform_Initialized_MemoryPool.hpp"
 #include "experiment_data.hpp"
 #include "heuristics.hpp"
+#include "memory_store.hpp"
 
 namespace jet_partitioner {
 
@@ -69,6 +70,7 @@ public:
     using member = typename team_policy_t::member_type;
     using pool_t = Kokkos::Random_XorShift64_Pool<Device>;
     using coarse_map = typename coarsen_heuristics<matrix_t>::coarse_map;
+    using mem_t = memory_store<matrix_t, int>;
     static constexpr ordinal_t get_null_val() {
         // this value must line up with the null value used by the hashmap
         // accumulator
@@ -88,12 +90,6 @@ public:
         coarse_map interp_mtx;
         int level;
         bool uniform_weights = false;
-    };
-
-    struct scratch_mem {
-        vtx_vt htable;
-        wgt_vt hvals;
-        edge_vt hrow_map;
     };
 
     // define behavior-controlling enums
@@ -346,7 +342,7 @@ struct consolidateUnique {
 
 coarse_level_triple build_coarse_graph(const coarse_level_triple level,
     const coarse_map vcmap,
-    scratch_mem scratch,
+    mem_t& mem,
     experiment_data<scalar_t>& experiment) {
 
     matrix_t g = level.mtx;
@@ -354,7 +350,7 @@ coarse_level_triple build_coarse_graph(const coarse_level_triple level,
     ordinal_t nc = vcmap.coarse_vtx;
 
     Kokkos::Timer timer;
-    edge_vt hrow_map = Kokkos::subview(scratch.hrow_map, std::make_pair(static_cast<ordinal_t>(0), nc + 1));
+    edge_vt hrow_map = Kokkos::subview(mem.p_mem.row_map, std::make_pair(static_cast<ordinal_t>(0), nc + 1));
     Kokkos::deep_copy(exec_space(), hrow_map, 0);
     wgt_vt f_vtx_w = level.vtx_w;
     wgt_vt c_vtx_w = wgt_vt("coarse vertex weights", nc);
@@ -375,9 +371,9 @@ coarse_level_triple build_coarse_graph(const coarse_level_triple level,
     Kokkos::fence();
     experiment.addMeasurement(Measurement::Prefix, timer.seconds());
     timer.reset();
-    vtx_vt htable = Kokkos::subview(scratch.htable, std::make_pair(static_cast<edge_offset_t>(0), hash_size));
+    vtx_vt htable = Kokkos::subview(mem.p_mem.entries, std::make_pair(static_cast<edge_offset_t>(0), hash_size));
     Kokkos::deep_copy(exec_space(), htable, NULL_KEY);
-    wgt_vt hvals = Kokkos::subview(scratch.hvals, std::make_pair(static_cast<edge_offset_t>(0), hash_size));
+    wgt_vt hvals = Kokkos::subview(mem.p_mem.vals, std::make_pair(static_cast<edge_offset_t>(0), hash_size));
     Kokkos::deep_copy(exec_space(), hvals, 0);
     // use thread teams on gpu when graph has decent average degree or very large max degree
     bool use_team = (!is_host_space && (hash_size / n >= 12 || has_large_row(g)));
@@ -491,7 +487,7 @@ coarse_map generate_coarse_mapping(const matrix_t g,
     return interpolation_graph;
 }
 
-std::list<coarse_level_triple> generate_coarse_graphs(const matrix_t fine_g, const wgt_vt vweights, experiment_data<scalar_t>& experiment, bool uniform_eweights = false) {
+std::list<coarse_level_triple> generate_coarse_graphs(const matrix_t fine_g, const wgt_vt vweights, mem_t& mem, experiment_data<scalar_t>& experiment, bool uniform_eweights = false) {
     std::list<coarse_level_triple> levels;
     coarse_level_triple finest;
     finest.mtx = fine_g;
@@ -501,10 +497,6 @@ std::list<coarse_level_triple> generate_coarse_graphs(const matrix_t fine_g, con
     finest.vtx_w = vweights;
     levels.push_back(finest);
     pool_t rand_pool(std::time(nullptr));
-    scratch_mem scratch;
-    scratch.htable = vtx_vt(Kokkos::view_alloc(Kokkos::WithoutInitializing, "htable scratch"), fine_g.nnz());
-    scratch.hvals = wgt_vt(Kokkos::view_alloc(Kokkos::WithoutInitializing, "hvals scratch"), fine_g.nnz());
-    scratch.hrow_map = edge_vt(Kokkos::view_alloc(Kokkos::WithoutInitializing, "hrow_map scratch"), fine_g.numRows() + 1);
     while (levels.rbegin()->mtx.numRows() > coarse_vtx_cutoff) {
 
         coarse_level_triple current_level = *levels.rbegin();
@@ -516,7 +508,7 @@ std::list<coarse_level_triple> generate_coarse_graphs(const matrix_t fine_g, con
         }
 
         Kokkos::Timer timer;
-        coarse_level_triple next_level = build_coarse_graph(current_level, interp_graph, scratch, experiment);
+        coarse_level_triple next_level = build_coarse_graph(current_level, interp_graph, mem, experiment);
         Kokkos::fence();
         experiment.addMeasurement(Measurement::Build, timer.seconds());
         timer.reset();

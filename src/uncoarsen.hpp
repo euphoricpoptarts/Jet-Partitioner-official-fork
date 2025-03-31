@@ -65,6 +65,7 @@ public:
     using gain_t = typename ref_t::gain_t;
     using gain_vt = typename ref_t::gain_vt;
     using stat = part_stat<matrix_t, part_t>;
+    using mem_t = memory_store<matrix_t, part_t>;
 
 static double get_max_imb(gain_vt part_sizes, part_t k){
     typename gain_vt::HostMirror ps_host = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), part_sizes);
@@ -85,51 +86,55 @@ static void project(ordinal_t fine_n, vtx_vt map, part_vt input, part_vt output)
     });
 }
 
-static part_vt multilevel_jet(std::list<clt> cg_list, part_vt coarse_guess, const config_t& config, rfd_t& rfd, experiment_data<scalar_t>& experiment, Kokkos::Timer& t){
+static part_vt multilevel_jet(std::list<clt> cg_list, const part_vt coarse_guess, const config_t& config, rfd_t& rfd, mem_t& mem, experiment_data<scalar_t>& experiment, Kokkos::Timer& t){
     part_t k = config.num_parts;
-    ref_t refiner(cg_list.front().mtx, k);
+    ref_t refiner;
 
     //this is used for outputting the coarse data for use by another program
     //timing data is reset after dumping for comparison with other program
     bool is_dumped = !config.dump_coarse;
+    part_vt solution("solution", cg_list.front().mtx.numRows());
+    part_vt current = Kokkos::subview(solution, std::make_pair(static_cast<ordinal_t>(0), static_cast<ordinal_t>(coarse_guess.extent(0))));
+    Kokkos::deep_copy(exec_space(), current, coarse_guess);
     while (!cg_list.empty()) {
         clt cg = cg_list.back();
         if(!is_dumped){
             //dumps the hierarchy starting from the coarsest graph that is balanced before refinement
             double imb = 0;
             if(!rfd.init){
-                imb = get_max_imb(stat::get_part_sizes(cg.mtx, cg.vtx_w, coarse_guess, k), k);
+                imb = get_max_imb(stat::get_part_sizes(cg.mtx, cg.vtx_w, current, k), k);
             } else {
                 imb = get_max_imb(rfd.part_sizes, k);
             }
             if(imb <= config.max_imb_ratio){
-                binary_dump<matrix_t, part_t>::dump_coarse_part(coarse_guess);
+                binary_dump<matrix_t, part_t>::dump_coarse_part(current);
                 binary_dump<matrix_t, part_t>::dump_coarse(cg_list);
                 is_dumped = true;
                 Kokkos::fence();
                 t.reset();
             }
         }
-        refiner.jet_refine(cg.mtx, config, cg.vtx_w, coarse_guess, cg.uniform_weights, rfd, experiment);
+        refiner.jet_refine(cg.mtx, config, cg.vtx_w, current, cg.uniform_weights, rfd, mem, experiment);
         cg_list.pop_back();
         if(!cg_list.empty()){
             clt next_cg = cg_list.back();
             // project solution onto finer level graph
-            part_vt fine_vec(Kokkos::ViewAllocateWithoutInitializing("fine vec"), next_cg.mtx.numRows());
-            project(next_cg.mtx.numRows(), cg.interp_mtx.map, coarse_guess, fine_vec);
-            coarse_guess = fine_vec;
+            part_vt fine_vec = Kokkos::subview(mem.p_mem.part, std::make_pair(static_cast<ordinal_t>(0), static_cast<ordinal_t>(next_cg.mtx.numRows())));
+            project(next_cg.mtx.numRows(), cg.interp_mtx.map, current, fine_vec);
+            current = Kokkos::subview(solution, std::make_pair(static_cast<ordinal_t>(0), static_cast<ordinal_t>(next_cg.mtx.numRows())));
+            Kokkos::deep_copy(exec_space(), current, fine_vec);
         }
     }
 
-    return coarse_guess;
+    return solution;
 }
 
 static part_vt uncoarsen(std::list<clt> cg_list, part_vt coarsest, const config_t& config,
-    scalar_t& ec, experiment_data<scalar_t>& experiment) {
+    scalar_t& ec, mem_t& mem, experiment_data<scalar_t>& experiment) {
 
     Kokkos::Timer t;
     rfd_t rfd;
-    part_vt res = multilevel_jet(cg_list, coarsest, config, rfd, experiment, t);
+    part_vt res = multilevel_jet(cg_list, coarsest, config, rfd, mem, experiment, t);
     Kokkos::fence();
     double rtime = t.seconds();
     t.reset();

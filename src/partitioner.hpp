@@ -39,6 +39,7 @@
 #include "contract.hpp"
 #include "uncoarsen.hpp"
 #include "initial_partition.hpp"
+#include "memory_store.hpp"
 
 namespace jet_partitioner {
 
@@ -57,6 +58,7 @@ public:
     using uncoarsener_t = uncoarsener<matrix_t, part_t>;
     using coarse_level_triple = typename coarsener_t::coarse_level_triple;
     using stat = part_stat<matrix_t, part_t>;
+    using mem_t = memory_store<matrix_t, part_t>;
 
 static part_vt partition(scalar_t& edge_cut,
                                   const config_t& config,
@@ -66,12 +68,6 @@ static part_vt partition(scalar_t& edge_cut,
                                   experiment_data<scalar_t>& experiment) {
 
     coarsener_t coarsener;
-
-    Kokkos::fence();
-    Kokkos::Timer t;
-    double start_time = t.seconds();
-    part_t k = config.num_parts;
-
     switch(config.coarsening_alg){
         case 0:
             coarsener.set_heuristic(coarsener_t::MtMetis);
@@ -85,6 +81,7 @@ static part_vt partition(scalar_t& edge_cut,
         default:
             coarsener.set_heuristic(coarsener_t::MtMetis);
     }
+    part_t k = config.num_parts;
     int cutoff = k*8;
     if(cutoff > 1024){
         cutoff = k*2;
@@ -92,24 +89,31 @@ static part_vt partition(scalar_t& edge_cut,
     }
     coarsener.set_coarse_vtx_cutoff(cutoff);
     coarsener.set_min_allowed_vtx(cutoff / 4);
-    std::list<coarse_level_triple> cg_list = coarsener.generate_coarse_graphs(g, vweights, experiment, uniform_ew);
-    Kokkos::fence();
-    double fin_coarsening_time = t.seconds();
-    double imb_ratio = config.max_imb_ratio;
-    part_vt coarsest_p = init_t::metis_init(cg_list.back().mtx, cg_list.back().vtx_w, k, imb_ratio);
-    //part_vt coarsest_p = init_t::random_init(cg_list.back().vtx_w, k, imb_ratio);
-    Kokkos::fence();
-    experiment.addMeasurement(Measurement::InitPartition, t.seconds() - fin_coarsening_time);
-    part_vt part = uncoarsener_t::uncoarsen(cg_list, coarsest_p, config,
-        edge_cut, experiment);
 
     Kokkos::fence();
-    double fin_uncoarsening = t.seconds();
-    cg_list.clear();
+    Kokkos::Timer t;
+    double start_time = t.seconds();
+    double fin_uncoarsening = 0;
+    part_vt part;
+    {
+        mem_t mem(g, k);
+        std::list<coarse_level_triple> cg_list = coarsener.generate_coarse_graphs(g, vweights, mem, experiment, uniform_ew);
+        Kokkos::fence();
+        double fin_coarsening_time = t.seconds();
+        experiment.addMeasurement(Measurement::Coarsen, fin_coarsening_time - start_time);
+        double imb_ratio = config.max_imb_ratio;
+        part_vt coarsest_p = init_t::metis_init(cg_list.back().mtx, cg_list.back().vtx_w, k, imb_ratio);
+        //part_vt coarsest_p = init_t::random_init(cg_list.back().vtx_w, k, imb_ratio);
+        Kokkos::fence();
+        experiment.addMeasurement(Measurement::InitPartition, t.seconds() - fin_coarsening_time);
+        part = uncoarsener_t::uncoarsen(cg_list, coarsest_p, config,
+            edge_cut, mem, experiment);
+        Kokkos::fence();
+        fin_uncoarsening = t.seconds();
+    }
     Kokkos::fence();
     double fin_time = t.seconds();
     experiment.addMeasurement(Measurement::Total, fin_time - start_time);
-    experiment.addMeasurement(Measurement::Coarsen, fin_coarsening_time - start_time);
     experiment.addMeasurement(Measurement::FreeGraph, fin_time - fin_uncoarsening);
     
     if(config.verbose){

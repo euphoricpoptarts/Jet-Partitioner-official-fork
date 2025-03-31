@@ -39,6 +39,7 @@
 #include "contract.hpp"
 #include "uncoarsen.hpp"
 #include "jet_defs.h"
+#include "memory_store.hpp"
 #include "io.hpp"
 #include <limits>
 
@@ -117,20 +118,25 @@ part_vt partition(value_t& edge_cut,
     using coarsener_t = contracter<matrix_t>;
     using uncoarsener_t = uncoarsener<matrix_t, part_t>;
     using coarse_level_triple = typename coarsener_t::coarse_level_triple;
+    using mem_t = memory_store<matrix_t, part_t>;
 
     std::list<coarse_level_triple> cg_list = load_coarse();
     Kokkos::fence();
     Kokkos::Timer t;
     double start_time = t.seconds();
     double fin_coarsening_time = t.seconds();
+    double fin_uncoarsening = 0;
     part_vt coarsest_p = load_coarse_part(cg_list.back().mtx.numRows());
     Kokkos::fence();
     experiment.addMeasurement(Measurement::InitPartition, t.seconds() - fin_coarsening_time);
-    part_vt part = uncoarsener_t::uncoarsen(cg_list, coarsest_p, config,
-        edge_cut, experiment);
-
-    Kokkos::fence();
-    double fin_uncoarsening = t.seconds();
+    part_vt part;
+    {
+        mem_t mem(cg_list.front().mtx, config.num_parts);
+        part = uncoarsener_t::uncoarsen(cg_list, coarsest_p, config,
+            edge_cut, mem, experiment);
+        Kokkos::fence();
+        fin_uncoarsening = t.seconds();
+    }
     cg_list.clear();
     Kokkos::fence();
     double fin_time = t.seconds();
