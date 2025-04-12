@@ -906,13 +906,17 @@ conn_data init_conn_data(const mem_t& mem, const matrix_t& g, const part_vt& par
     Kokkos::parallel_for("comp conn row size", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t& i){
         ordinal_t degree = g.graph.row_map(i + 1) - g.graph.row_map(i);
         if(degree > static_cast<ordinal_t>(k)) degree = k;
-        cdata.conn_offsets(i + 1) = degree;
+        cdata.conn_offsets(i) = degree;
     });
     edge_offset_t gain_size = 0;
-    Kokkos::parallel_scan("comp conn offsets", policy_t(0, n + 1), KOKKOS_LAMBDA(const ordinal_t& i, edge_offset_t& update, const bool final){
-        update += cdata.conn_offsets(i);
+    Kokkos::parallel_scan("comp conn offsets", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t& i, edge_offset_t& update, const bool final){
+        edge_offset_t x = cdata.conn_offsets(i);
         if(final){
             cdata.conn_offsets(i) = update;
+        }
+        update += x;
+        if(final && i + 1 == n){
+            cdata.conn_offsets(n) = update;
         }
     }, gain_size);
     cdata.conn_vals = Kokkos::subview(mem.p_mem.vals, std::make_pair(static_cast<edge_offset_t>(0), gain_size));
