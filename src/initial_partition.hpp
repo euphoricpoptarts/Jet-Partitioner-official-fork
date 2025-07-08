@@ -157,7 +157,7 @@ class maxheap {
     std::vector<ordinal_t> keys;
     std::vector<scalar_t> vals;
     std::vector<int> loc;
-    int size;
+    int size, swaps;
 
     void swap(int l1, int l2){
         ordinal_t k1 = keys[l1];
@@ -170,6 +170,7 @@ class maxheap {
         keys[l2] = k1;
         vals[l1] = v2;
         vals[l2] = v1;
+        swaps++;
     }
 
     void bubble_up(int l) {
@@ -208,7 +209,8 @@ public:
         keys(n, -1),
         vals(n),
         loc(n, -1),
-        size(0) {}
+        size(0),
+        swaps(0) {}
 
     void insert_or_update(ordinal_t v, scalar_t base, scalar_t add){
         int l = loc[v];
@@ -241,10 +243,15 @@ public:
             loc[k] = -1;
         }
         size = 0;
+        swaps = 0;
     }
 
     int get_size() {
         return size;
+    }
+
+    int get_swaps() {
+        return swaps;
     }
 };
 
@@ -390,18 +397,18 @@ static part_vt ggg(matrix_t g, wgt_vt vw_dev, int k, double imb_ratio) {
     }, total);
     scalar_t opt = total / k;
     scalar_t upper = opt * imb_ratio;
-    edge_mt row_map("row map host", n+1);
-    vtx_mt entries("entries host", g.nnz());
-    wgt_mt values("values host", g.nnz());
-    wgt_mt vw("vtx weights host", n);
+    edge_mt row_map(Kokkos::ViewAllocateWithoutInitializing("row map host"), n+1);
+    vtx_mt entries(Kokkos::ViewAllocateWithoutInitializing("entries host"), g.nnz());
+    wgt_mt values(Kokkos::ViewAllocateWithoutInitializing("values host"), g.nnz());
+    wgt_mt vw(Kokkos::ViewAllocateWithoutInitializing("vtx weights host"), n);
     Kokkos::deep_copy(row_map, g.graph.row_map);
     Kokkos::deep_copy(entries, g.graph.entries);
     Kokkos::deep_copy(values, g.values);
     Kokkos::deep_copy(vw, vw_dev);
-    part_mt part("partition host", n);
-    part_mt best_part("best partition", n);
+    part_mt part(Kokkos::ViewAllocateWithoutInitializing("partition host"), n);
+    part_mt best_part(Kokkos::ViewAllocateWithoutInitializing("best partition"), n);
     scalar_t best_cut = 1000000000;
-    wgt_mt part_size("part sizes", k);
+    wgt_mt part_size(Kokkos::ViewAllocateWithoutInitializing("part sizes"), k);
 
     std::srand(std::time({}));
     std::vector<ordinal_t> order(n);
@@ -423,8 +430,9 @@ static part_vt ggg(matrix_t g, wgt_vt vw_dev, int k, double imb_ratio) {
         for(part_t p = 0; p < k; p++){
             ps_h.insert_or_update(p, 0);
         }
-        Kokkos::deep_copy(part, -1);
-        Kokkos::deep_copy(part_size, 0);
+        Kokkos::deep_copy(Kokkos::Serial(), part, -1);
+        Kokkos::deep_copy(Kokkos::Serial(), part_size, 0);
+        // Fisher-Yates shuffle
         for(int i = 0; i < n - 1; i++){
             int s = std::rand() % (n - 1 - i);
             s += i;
@@ -432,8 +440,7 @@ static part_vt ggg(matrix_t g, wgt_vt vw_dev, int k, double imb_ratio) {
             order[s] = order[i];
             order[i] = c;
         }
-        // could use permutation ordering here
-        // maybe sort by vtx wgt?
+        // actual greedy graph growing part
         for(ordinal_t x = 0; x < n; x++){
             ordinal_t i = order[x];
             // i may already be assigned
@@ -445,11 +452,12 @@ static part_vt ggg(matrix_t g, wgt_vt vw_dev, int k, double imb_ratio) {
             // at least one iteration (ie. for vertex i) should always occur
             while(h.get_size() > 0){
                 ordinal_t u = h.pop_top();
-                if(part_size(p) + vw(u) >= upper && i != u) continue;
+                if(part_size(p) + vw(u) > upper && i != u) continue;
                 // std::cout << "Adding vertex " << u << " to part " << p << std::endl;
                 part(u) = p;
                 part_size(p) += vw(u);
                 ps_h.insert_or_update(p, vw(u));
+                if(part_size(p) >= upper) break;
                 for(edge_offset_t j = row_map(u); j < row_map(u+1); j++){
                     ordinal_t v = entries(j);
                     // ignore assigned vertices
@@ -462,10 +470,9 @@ static part_vt ggg(matrix_t g, wgt_vt vw_dev, int k, double imb_ratio) {
             h.clear();
         }
         scalar_t cutsize = cut(row_map, entries, values, part, n);
-        std::cout << cutsize << std::endl;
         if(cutsize < best_cut){
             best_cut = cutsize;
-            Kokkos::deep_copy(best_part, part);
+            Kokkos::deep_copy(Kokkos::Serial(), best_part, part);
         }
         ps_h.clear();
     }
