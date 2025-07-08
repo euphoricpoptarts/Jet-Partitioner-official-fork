@@ -83,9 +83,10 @@ static part_vt partition(scalar_t& edge_cut,
     }
     part_t k = config.num_parts;
     int cutoff = k*8;
-    if(cutoff > 1024){
+    int limit = 1024;
+    if(cutoff > limit){
         cutoff = k*2;
-        cutoff = std::max(1024, cutoff);
+        cutoff = std::max(limit, cutoff);
     }
     coarsener.set_coarse_vtx_cutoff(cutoff);
     coarsener.set_min_allowed_vtx(cutoff / 4);
@@ -102,7 +103,7 @@ static part_vt partition(scalar_t& edge_cut,
         double fin_coarsening_time = t.seconds();
         experiment.addMeasurement(Measurement::Coarsen, fin_coarsening_time - start_time);
         double imb_ratio = config.max_imb_ratio;
-        part_vt coarsest_p = init_t::metis_init(cg_list.back().mtx, cg_list.back().vtx_w, k, imb_ratio);
+        part_vt coarsest_p = init_t::ggg(cg_list.back().mtx, cg_list.back().vtx_w, k, imb_ratio);
         //part_vt coarsest_p = init_t::random_init(cg_list.back().vtx_w, k, imb_ratio);
         Kokkos::fence();
         experiment.addMeasurement(Measurement::InitPartition, t.seconds() - fin_coarsening_time);
