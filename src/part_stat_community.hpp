@@ -77,7 +77,7 @@ public:
     using team_policy_t = Kokkos::TeamPolicy<exec_space>;
     using member = typename team_policy_t::member_type;
     static constexpr bool is_host_space = std::is_same<typename exec_space::memory_space, typename Kokkos::DefaultHostExecutionSpace::memory_space>::value;
-    static constexpr double penalty = 0.25;
+    static constexpr double penalty = 1.0;
 
 // metadata that is preserved between levels in the multilevel scheme
 struct refine_data {
@@ -136,6 +136,10 @@ static ordinal_t get_total_labels(const part_vt labels){
 		if(used(i) > 0) update++;
 	}, total);
 	return total;
+}
+
+static double get_penalty() {
+    return penalty;
 }
 
 static void relabel(part_vt labels){

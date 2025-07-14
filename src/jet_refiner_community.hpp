@@ -175,7 +175,7 @@ vtx_view_t jet_lp(const problem& prob, const matrix_t& c_graph, const part_vt& p
     cdata_t& cdata = mem.cd_mem;
     part_vt conn_table_sizes = cdata.conn_table_sizes;
     gain_vt pvals = mem.p_mem.pvals;
-    float inv_2m = 0.25 / static_cast<float>(rfd.g_deg);
+    float inv_2m = stat::get_penalty() / static_cast<float>(rfd.g_deg);
     vtx_view_t vtx1 = mem.s_mem.vtx1;
     vtx_view_t vtx2 = mem.s_mem.vtx2;
     vtx_view_t order1 = mem.p_mem.order1;
@@ -387,13 +387,11 @@ vtx_view_t jet_lp(const problem& prob, const matrix_t& c_graph, const part_vt& p
     return pos_moves;
 }
 
-// updates datastructures assuming a "large" number of vertices are moved
-template <bool uniform>
-void update_large(const problem& prob, const part_vt part, const vtx_view_t swaps, mem_t& mem){
+// stream-compacts order2 for the vertices adjacent to any changed vertex
+vtx_view_t find_affected(const problem& prob, const vtx_view_t swaps, mem_t& mem){
     const matrix_t& g = prob.g;
     ordinal_t total_moves = swaps.extent(0);
     vtx_view_t swap_bit = mem.s_mem.zeros1;
-    cdata_t& cdata = mem.cd_mem;
     ordinal_t total = 0;
     vtx_view_t vtx1 = mem.s_mem.vtx1;
     vtx_view_t order1 = mem.p_mem.order1;
@@ -471,20 +469,31 @@ void update_large(const problem& prob, const part_vt part, const vtx_view_t swap
         }
     }, mem.s_mem.scan_host);
     exec_space().fence();
-    total = mem.s_mem.scan_host();
+    return vtx1;
+}
+
+// updates datastructures assuming a "large" number of vertices are moved
+template <bool uniform>
+void update_large(const problem& prob, const part_vt part, const vtx_view_t swaps, mem_t& mem){
+    const matrix_t& g = prob.g;
+    cdata_t& cdata = mem.cd_mem;
+    vtx_view_t vtx1 = find_affected(prob, swaps, mem);
+    ordinal_t total = mem.s_mem.scan_host();
+    ordinal_t big_begin = mem.p_mem.offset_mid;
     if(big_begin < g.numRows()){
-        big_begin = pin_host();
+        big_begin = mem.s_mem.pin_host();
     } else {
         big_begin = total;
     }
     ordinal_t small = big_begin;
     ordinal_t big = total - small;
+    // this logic is entangled with find_affected()
     vtx_view_t big_rows = Kokkos::subview(vtx1, std::make_pair(big_begin, total));
     vtx_view_t small_rows = Kokkos::subview(vtx1, std::make_pair(static_cast<ordinal_t>(0), small));
     gain_vt pvals = mem.p_mem.pvals;
     int max_size = 512;
     //recompute conn tables for each vertex adjacent to a moved vertex
-    Kokkos::parallel_for("reset conn DS", team_policy_t(big, Kokkos::AUTO).set_scratch_size(0, Kokkos::PerTeam(max_size*sizeof(gain_t) + max_size*sizeof(part_t))), KOKKOS_LAMBDA(const member& t){
+    Kokkos::parallel_for("update large (big rows)", team_policy_t(big, Kokkos::AUTO).set_scratch_size(0, Kokkos::PerTeam(max_size*sizeof(gain_t) + max_size*sizeof(part_t))), KOKKOS_LAMBDA(const member& t){
         const ordinal_t i = big_rows(t.league_rank());
         edge_offset_t g_start = cdata.conn_offsets(i);
         edge_offset_t g_end = cdata.conn_offsets(i + 1);
@@ -544,15 +553,15 @@ void update_large(const problem& prob, const part_vt part, const vtx_view_t swap
             });
         }
     });
-    Kokkos::parallel_for("reset conn DS", policy_t(0, small), KOKKOS_LAMBDA(const ordinal_t x){
+    Kokkos::parallel_for("update large (small rows)", policy_t(0, small), KOKKOS_LAMBDA(const ordinal_t x){
         const ordinal_t i = small_rows(x);
         edge_offset_t g_start = cdata.conn_offsets(i);
         edge_offset_t g_end = cdata.conn_offsets(i + 1);
         for(edge_offset_t j = g_start; j < g_end; j++) {
-            cdata.conn_entries(j) = NULL_PART;
-        }
-        for(edge_offset_t j = g_start; j < g_end; j++) {
-            cdata.conn_vals(j) = 0;
+            if(cdata.conn_entries(j) != NULL_PART){
+                cdata.conn_entries(j) = NULL_PART;
+                cdata.conn_vals(j) = 0;
+            }
         }
         part_t size = g_end - g_start;
         part_t* s_conn_entries = cdata.conn_entries.data() + g_start;
@@ -598,7 +607,7 @@ void update_small(const problem& prob, const part_vt part, const vtx_view_t swap
     ordinal_t total_moves = swaps.extent(0);
     gain_vt pvals = mem.p_mem.pvals;
     cdata_t& cdata = mem.cd_mem;
-    Kokkos::parallel_for("update conns (subtract) (high degree)", team_policy_t(total_moves, Kokkos::AUTO), KOKKOS_LAMBDA(const member& t){
+    Kokkos::parallel_for("update small (subtract)", team_policy_t(total_moves, Kokkos::AUTO), KOKKOS_LAMBDA(const member& t){
         ordinal_t i = swaps(t.league_rank());
         part_t p = part(i);
         //subtract i's contribution to p connectivity for adjacent vertices
@@ -676,7 +685,7 @@ void update_small(const problem& prob, const part_vt part, const vtx_view_t swap
         cdata.conn_vals(offset + p_o) = old_val;
     });
 
-    Kokkos::parallel_for("update conns (add) (high degree)", team_policy_t(total_moves, Kokkos::AUTO), KOKKOS_LAMBDA(const member& t){
+    Kokkos::parallel_for("update small (add)", team_policy_t(total_moves, Kokkos::AUTO), KOKKOS_LAMBDA(const member& t){
         ordinal_t i = swaps(t.league_rank());
         //part contains new part at this point
         part_t best = part(i);
@@ -778,7 +787,7 @@ void perform_moves(const problem& prob, part_vt part, const vtx_view_t swaps, me
         Kokkos::atomic_add(&curr_state.total_deg(best), wdeg(i));
     });
     //change part assignments and update part sizes
-    if(!cdata.init || total_moves >= prob.g.numRows() * 0.1){
+    if(!cdata.init || total_moves >= prob.g.numRows() * 0.04){
         // update cluster ids before updating datastructures
         Kokkos::parallel_for("update parts", policy_t(0, total_moves), KOKKOS_LAMBDA(const ordinal_t x){
             ordinal_t i = swaps(x);
@@ -799,6 +808,7 @@ void perform_moves(const problem& prob, part_vt part, const vtx_view_t swaps, me
     int64_t cut_change = curr_pval - curr_state.last_pval;
     curr_state.last_pval = curr_pval;
     curr_state.cut -= cut_change;
+    curr_state.mod = stat::modularity(curr_state.g_deg, curr_state.cut, curr_state.total_deg);
 }
 
 void fast_fill(vtx_view_t a, ordinal_t V){
@@ -996,7 +1006,6 @@ void truncate_and_init_mem(mem_t& mem, problem& prob, int label_count, bool top)
 
 template <bool uniform>
 void jet_refine(const matrix_t g, wgt_view_t wdeg, part_vt best_part, refine_data& best_state, bool is_initial, mem_t& input_mem){
-    Kokkos::Timer y;
     // contains reusable memory to avoid repeated allocations/deallocations
     // some of this memory contains state information
     mem_t mem(input_mem, g);
@@ -1044,8 +1053,6 @@ void jet_refine(const matrix_t g, wgt_view_t wdeg, part_vt best_part, refine_dat
             moves = jet_lp<uniform>(prob, c_graph, part, curr_state, mem, filter_ratio);
             if(moves.extent(0) == 0) break;
             perform_moves<uniform>(prob, part, moves, mem, curr_state);
-            curr_state.mod = stat::modularity(curr_state.g_deg, curr_state.cut, curr_state.total_deg);
-            // std::cout << "Cut: " << curr_state.cut << "; Modularity: " << std::setprecision(6) << curr_state.mod << "; Labels: " << stat::total_labels(curr_state.total_deg) << std::endl;
             //copy current partition and relevant data to output partition if following conditions pass
             if(curr_state.mod > best_state.mod){
                 copy_refine_data(best_state, curr_state);
