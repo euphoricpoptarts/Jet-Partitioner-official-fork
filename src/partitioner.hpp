@@ -103,6 +103,7 @@ static part_vt partition(scalar_t& edge_cut,
         double fin_coarsening_time = t.seconds();
         experiment.addMeasurement(Measurement::Coarsen, fin_coarsening_time - start_time);
         double imb_ratio = config.max_imb_ratio;
+        // init_t::metis_init(cg_list.back().mtx, cg_list.back().vtx_w, k, imb_ratio);
         part_vt coarsest_p = init_t::ggg(cg_list.back().mtx, cg_list.back().vtx_w, k, imb_ratio);
         //part_vt coarsest_p = init_t::random_init(cg_list.back().vtx_w, k, imb_ratio);
         Kokkos::fence();

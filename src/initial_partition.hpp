@@ -42,6 +42,7 @@
 #include <utility>
 #include <numeric>
 #include <random>
+#include <algorithm>
 #include <type_traits>
 #include "metis.h"
 #include <Kokkos_Core.hpp>
@@ -102,7 +103,9 @@ static part_vt metis_init(matrix_t g, wgt_vt vtx_w, int k, double imb_ratio){
     metis_mt xadj = to_metis_int<typename matrix_t::row_map_type>(g.graph.row_map);
     metis_mt adjcwgt = to_metis_int<wgt_vt>(g.values);
     metis_mt adjncy = to_metis_int<vtx_vt>(g.graph.entries);
-    real_t imbalance = imb_ratio;
+    double loose_ratio = 1.0 + (static_cast<double>(k) / static_cast<double>(2*n));
+    if(loose_ratio < imb_ratio) loose_ratio = imb_ratio;
+    real_t imbalance = loose_ratio;
     int ec = 0;
     int nweights = 1;
     int ret = METIS_PartGraphKway(&n, &nweights, xadj.data(), adjncy.data(),
@@ -112,6 +115,7 @@ static part_vt metis_init(matrix_t g, wgt_vt vtx_w, int k, double imb_ratio){
         std::cerr << "Metis could not partition coarsest graph. Exiting..." << std::endl;
         exit(-1);
     }
+    std::cout << "Metis ec: " << ec << std::endl;
     Kokkos::deep_copy(part_metis, pm);
     part_vt part("part", n);
     copy<part_vt, metis_vt>(part, part_metis);
@@ -235,6 +239,10 @@ public:
             bubble_down(0);
         }
         return top;
+    }
+
+    ordinal_t peak_top() const {
+        return keys[0];
     }
 
     void clear(){
@@ -389,14 +397,166 @@ static scalar_t cut(edge_mt row_map, vtx_mt entries, wgt_mt values, part_mt part
     return c;
 }
 
+static part_mt simple_lp(ordinal_t n, part_t k, edge_mt row_map, vtx_mt entries, wgt_mt values, wgt_mt vw, part_mt part, wgt_mt part_size, scalar_t upper){
+    std::vector<int> order(n);
+    std::iota(order.begin(), order.end(), 0);
+    // more effective (though more memory intensive) datastructure
+    // contains an entry for every possible cluster id
+    std::vector<int> conn_strength(k, 0);
+    // conn keys holds a list of the current nonzero entries in conn_strength
+    std::vector<int> conn_keys(k, 0);
+    // shuffle the vertex ordering randomly
+    std::shuffle(order.begin(), order.end(), std::mt19937{std::random_device{}()});
+    // std::cout << "LP Input cut: " << cut(row_map, entries, values, part, n) / 2 << std::endl;
+    // iterate until convergance (no vertices change cluster in an iteration)
+    for(int lp_iteration = 0; ; lp_iteration++){
+        // auto start = std::chrono::high_resolution_clock::now();
+        int t_modified = 0;
+        for(int i = 0; i < n; i++){
+            int v = order[i];
+            int adj_clusters = 0;
+            for(int j = row_map(v); j < row_map(v+1); j++){
+                int u = entries(j);
+                int cu = part(u);
+                // update nonzero entries list
+                if(conn_strength[cu] == 0){
+                    conn_keys[adj_clusters++] = cu;
+                }
+                // increment strength
+                conn_strength[cu] += values(j);
+            }
+            int max_val = 0;
+            int argmax = k + 1;
+            // iterate over nonzero entries
+            // find argmax as most connected adjacent cluster
+            for(int cx = 0; cx < adj_clusters; cx++){
+                int key = conn_keys[cx];
+                int val = conn_strength[key];
+                // reset to zero for next vertex
+                conn_strength[key] = 0;
+                // minimum label heuristic to break ties
+                if(val > max_val || (val == max_val && key < argmax)){
+                    argmax = key;
+                    max_val = val;
+                }
+            }
+            if(max_val > 0){
+                if(part(v) != argmax && part_size(argmax) + vw(v) <= upper){
+                    part_size(part(v)) -= vw(v);
+                    part(v) = argmax;
+                    part_size(argmax) += vw(v);
+                    t_modified++;
+                }
+            }
+        }
+        // std::cout << "LP Output cut: " << cut(row_map, entries, values, part, n) / 2 << std::endl;
+        // auto end = std::chrono::high_resolution_clock::now();
+        // auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(end - start);
+        // std::cout << "Iteration time: " << duration << std::endl;
+        // no vertices were modified, then stop
+        if(t_modified == 0) break;
+    }
+    return part;
+}
+
+static part_mt fm(ordinal_t n, part_t k, edge_mt row_map, vtx_mt entries, wgt_mt values, wgt_mt vw, part_mt part, scalar_t upper){
+    part_mt best_part(Kokkos::ViewAllocateWithoutInitializing("best part"), n);
+    Kokkos::deep_copy(Kokkos::Serial(), best_part, part);
+    scalar_t best_cut = cut(row_map, entries, values, part, n);
+    std::cout << "Cut before FM: " << (best_cut / 2) << std::endl;
+
+    scalar_t old_cut;
+    do {
+        old_cut = best_cut;
+        Kokkos::deep_copy(Kokkos::Serial(), part, best_part);
+        maxheap q_a(n);
+        maxheap q_b(n);
+
+        std::vector<scalar_t> gain(n, 0);
+        std::vector<part_t> dest(n);
+
+        wgt_mt part_size(Kokkos::ViewAllocateWithoutInitializing("part sizes"), k);
+        Kokkos::deep_copy(Kokkos::Serial(), part_size, 0);
+        for(ordinal_t u = 0; u < n; u++){
+            for(edge_offset_t j = row_map(u); j < row_map(u+1); j++){
+                ordinal_t v = entries(j);
+                ordinal_t pv = part(v);
+                if(pv == part(u)) gain[u] -= values(j);
+                else gain[u] += values(j);
+            }
+            if(part(u) == 0) dest[u] = 1;
+            else dest[u] = 0;
+            if(part(u) == 0) q_a.insert_or_update(u, gain[u], 0);
+            else q_b.insert_or_update(u, gain[u], 0);
+            part_size(part(u)) += vw(u);
+        }
+
+        scalar_t curr_cut = best_cut;
+        while(q_a.get_size() + q_b.get_size() > 0){
+            ordinal_t u;
+            if(q_a.get_size() == 0){
+                u = q_b.pop_top();
+            } else if(q_b.get_size() == 0){
+                u = q_a.pop_top();
+            } else {
+                ordinal_t a = q_a.peak_top();
+                ordinal_t b = q_b.peak_top();
+                if(part_size(0) + vw(b) > upper && part_size(1) + vw(a) > upper){
+                    if(part_size(0) + vw(b) < part_size(1) + vw(a)){
+                        u = q_b.pop_top();
+                    } else {
+                        u = q_a.pop_top();
+                    }
+                } else if(part_size(0) + vw(b) > upper) {
+                    u = q_a.pop_top();
+                } else if(part_size(1) + vw(a) > upper) {
+                    u = q_b.pop_top();
+                } else {
+                    if(gain[a] > gain[b]){
+                        u = q_a.pop_top();
+                    } else {
+                        u = q_b.pop_top();
+                    }
+                }
+            }
+            part_t d = dest[u];
+            curr_cut -= 2*gain[u];
+            part_size(d) += vw(u);
+            part_size(part(u)) -= vw(u);
+            part(u) = d;
+            dest[u] = -1;
+            for(edge_offset_t j = row_map(u); j < row_map(u+1); j++){
+                ordinal_t v = entries(j);
+                // ignore previously moved vertices
+                if(dest[v] == -1) continue;
+                scalar_t wgt = values(j);
+                if(d == dest[v]) wgt = 2*wgt;
+                else wgt = -2*wgt;
+                if(part(v) == 0) q_a.insert_or_update(v, gain[v], wgt);
+                else q_b.insert_or_update(v, gain[v], wgt);
+                gain[v] += wgt;
+            }
+            if(curr_cut < best_cut && part_size(0) <= upper && part_size(1) <= upper){
+                best_cut = curr_cut;
+                // TODO: fix this
+                Kokkos::deep_copy(Kokkos::Serial(), best_part, part);
+            }
+        }
+        std::cout << "Cut after FM: " << (best_cut / 2) << std::endl;
+    } while(best_cut < old_cut);
+    return best_part;
+}
+
 static part_vt ggg(matrix_t g, wgt_vt vw_dev, int k, double imb_ratio) {
     ordinal_t n = g.numRows();
     scalar_t total = 0;
     Kokkos::parallel_reduce("sum vtx", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i, scalar_t& update){
         update += vw_dev(i);
     }, total);
+    double loose_ratio = 1.0 + (static_cast<double>(k) / static_cast<double>(2*n));
+    if(loose_ratio < imb_ratio) loose_ratio = imb_ratio;
     scalar_t opt = total / k;
-    scalar_t upper = opt * imb_ratio;
+    scalar_t upper = opt * loose_ratio;
     edge_mt row_map(Kokkos::ViewAllocateWithoutInitializing("row map host"), n+1);
     vtx_mt entries(Kokkos::ViewAllocateWithoutInitializing("entries host"), g.nnz());
     wgt_mt values(Kokkos::ViewAllocateWithoutInitializing("values host"), g.nnz());
@@ -406,15 +566,9 @@ static part_vt ggg(matrix_t g, wgt_vt vw_dev, int k, double imb_ratio) {
     Kokkos::deep_copy(values, g.values);
     Kokkos::deep_copy(vw, vw_dev);
     part_mt part(Kokkos::ViewAllocateWithoutInitializing("partition host"), n);
-    part_mt best_part(Kokkos::ViewAllocateWithoutInitializing("best partition"), n);
-    scalar_t best_cut = 1000000000;
     wgt_mt part_size(Kokkos::ViewAllocateWithoutInitializing("part sizes"), k);
 
-    std::srand(std::time({}));
     std::vector<ordinal_t> order(n);
-    for(ordinal_t i = 0; i < n; i++){
-        order[i] = i;
-    }
 
     std::vector<scalar_t> base_prio(n, 0);
     for(ordinal_t u = 0; u < n; u++){
@@ -426,20 +580,25 @@ static part_vt ggg(matrix_t g, wgt_vt vw_dev, int k, double imb_ratio) {
     maxheap h(n);
     minheap ps_h(k);
 
-    for(int trial = 0; trial < 5; trial++){
+    for(ordinal_t i = 0; i < n; i++){
+        h.insert_or_update(i, vw(i), 0);
+    }
+
+    for(ordinal_t i = 0; i < n; i++){
+        order[i] = h.pop_top();
+    }
+    h.clear();
+
+    part_mt best_part(Kokkos::ViewAllocateWithoutInitializing("best partition host"), n);
+    scalar_t best_cut = 1000000000;
+
+    for(int q = 0; q < 10; q++){
+        std::shuffle(order.begin(), order.end(), std::mt19937{std::random_device{}()});
         for(part_t p = 0; p < k; p++){
             ps_h.insert_or_update(p, 0);
         }
         Kokkos::deep_copy(Kokkos::Serial(), part, -1);
         Kokkos::deep_copy(Kokkos::Serial(), part_size, 0);
-        // Fisher-Yates shuffle
-        for(int i = 0; i < n - 1; i++){
-            int s = std::rand() % (n - 1 - i);
-            s += i;
-            ordinal_t c = order[s];
-            order[s] = order[i];
-            order[i] = c;
-        }
         // actual greedy graph growing part
         for(ordinal_t x = 0; x < n; x++){
             ordinal_t i = order[x];
@@ -453,7 +612,6 @@ static part_vt ggg(matrix_t g, wgt_vt vw_dev, int k, double imb_ratio) {
             while(h.get_size() > 0){
                 ordinal_t u = h.pop_top();
                 if(part_size(p) + vw(u) > upper && i != u) continue;
-                // std::cout << "Adding vertex " << u << " to part " << p << std::endl;
                 part(u) = p;
                 part_size(p) += vw(u);
                 ps_h.insert_or_update(p, vw(u));
@@ -463,18 +621,19 @@ static part_vt ggg(matrix_t g, wgt_vt vw_dev, int k, double imb_ratio) {
                     // ignore assigned vertices
                     if(part(v) != -1) continue;
                     scalar_t wgt = values(j);
-                    // std::cout << "Adding vertex " << v << " with wgt " << wgt << " to maxheap" << std::endl;
                     h.insert_or_update(v, base_prio[v], 2*wgt);
                 }
             }
             h.clear();
         }
-        scalar_t cutsize = cut(row_map, entries, values, part, n);
-        if(cutsize < best_cut){
-            best_cut = cutsize;
-            Kokkos::deep_copy(Kokkos::Serial(), best_part, part);
-        }
+            
         ps_h.clear();
+        part = simple_lp(n, k, row_map, entries, values, vw, part, part_size, upper);
+        scalar_t curr_cut = cut(row_map, entries, values, part, n);
+        if(curr_cut < best_cut){
+            Kokkos::deep_copy(Kokkos::Serial(), best_part, part);
+            best_cut = curr_cut;
+        }
     }
     part_vt part_dev("part dev", n);
     Kokkos::deep_copy(part_dev, best_part);

@@ -1000,7 +1000,9 @@ void jet_refine(const matrix_t g, const config_t& config, wgt_vt vtx_w, part_vt 
     //initialize metadata if this is first level being refined
     //ie. if this is the coarsest level
     part_t k = config.num_parts;
-    double imb_ratio = config.max_imb_ratio;
+    double imb_ratio = 1.0 + (static_cast<double>(k) / static_cast<double>(2*g.numRows()));
+    if(imb_ratio < config.max_imb_ratio) imb_ratio = config.max_imb_ratio;
+    // double imb_ratio = config.max_imb_ratio;
     if(!best_state.init){
         best_state.cut = stat::get_total_cut(g, best_part);
         best_state.part_sizes = stat::get_part_sizes(g, vtx_w, best_part, k);
