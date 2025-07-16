@@ -163,7 +163,7 @@ void relabel_contiguously(part_vt labels, refine_data& rfd, mem_t& mem){
 //determines which vertices (if any) should be moved to another part to improve objective
 //8 kernels, 2 device-host syncs
 template <bool uniform>
-vtx_view_t jet_lp(const problem& prob, const matrix_t& c_graph, const part_vt& part, const refine_data& rfd, mem_t& mem, float filter_ratio){
+vtx_view_t jet_lp(const problem& prob, const matrix_t& c_graph, const part_vt& part, const refine_data& rfd, mem_t& mem, float filter_ratio, wgt_view_t vtx_w, wgt_view_t cluster_size, gain_t upper_bound){
     const matrix_t& g = prob.g;
     ordinal_t n = g.numRows();
     ordinal_t num_pos = 0;
@@ -203,6 +203,7 @@ vtx_view_t jet_lp(const problem& prob, const matrix_t& c_graph, const part_vt& p
             gain_t j_val = c_graph.values(j);
             if(j_val > 0 && j_val >= b_conn){
                 part_t px = c_graph.graph.entries(j);
+                if(cluster_size(px) + vtx_w(i) > upper_bound) continue;
                 float j_conn = j_val - static_cast<float>(total_deg(px))*multi;
                 if(j_conn >= b_conn){
                     b_conn = j_conn;
@@ -240,6 +241,7 @@ vtx_view_t jet_lp(const problem& prob, const matrix_t& c_graph, const part_vt& p
                 gain_t j_val = c_graph.values(j);
                 if(j_val > 0 && j_val >= maxl){
                     part_t px = c_graph.graph.entries(j);
+                    if(cluster_size(px) + vtx_w(i) > upper_bound) continue;
                     float j_conn = j_val - static_cast<float>(total_deg(px))*multi;
                     if(j_conn >= maxl){
                         // this is not deterministic unless the case j_conn == maxl is handled properly
@@ -645,6 +647,7 @@ void update_small(const problem& prob, const part_vt part, const vtx_view_t swap
         part_t best = dest_part(i);
         // insert p (old cluster) into the hashmap
         part_t p = part(i);
+        if(best == p) return;
         part(i) = best;
         dest_part(i) = NULL_PART;
         part_t size = cdata.conn_table_sizes(i);
@@ -773,7 +776,7 @@ gain_t pval_sum(gain_vt pvals, ordinal_t n){
 //perform swaps, update gains, and compute change to cut and imbalance
 //4 kernels, 1 device-host syncs
 template <bool uniform>
-void perform_moves(const problem& prob, part_vt part, const vtx_view_t swaps, mem_t& mem, refine_data& curr_state){
+void perform_moves(const problem& prob, part_vt part, const vtx_view_t swaps, mem_t& mem, refine_data& curr_state, wgt_view_t vtx_w, wgt_view_t cluster_size, gain_t upper_bound){
     const wgt_view_t& wdeg = prob.wdeg;
     vtx_view_t dest_part = mem.p_mem.dest_part;
     ordinal_t total_moves = swaps.extent(0);
@@ -783,8 +786,14 @@ void perform_moves(const problem& prob, part_vt part, const vtx_view_t swaps, me
         ordinal_t i = swaps(x);
         part_t best = dest_part(i);
         part_t p = part(i);
-        Kokkos::atomic_add(&curr_state.total_deg(p), -wdeg(i));
-        Kokkos::atomic_add(&curr_state.total_deg(best), wdeg(i));
+        if(Kokkos::atomic_fetch_add(&cluster_size(best), vtx_w(i)) + vtx_w(i) > upper_bound){
+            Kokkos::atomic_add(&cluster_size(best), -vtx_w(i));
+            dest_part(i) = p;
+        } else {
+            Kokkos::atomic_add(&curr_state.total_deg(p), -wdeg(i));
+            Kokkos::atomic_add(&curr_state.total_deg(best), wdeg(i));
+            Kokkos::atomic_add(&cluster_size(p), -vtx_w(i));
+        }
     });
     //change part assignments and update part sizes
     if(!cdata.init || total_moves >= prob.g.numRows() * 0.04){
@@ -1005,7 +1014,7 @@ void truncate_and_init_mem(mem_t& mem, problem& prob, int label_count, bool top)
 }
 
 template <bool uniform>
-void jet_refine(const matrix_t g, wgt_view_t wdeg, part_vt best_part, refine_data& best_state, bool is_initial, mem_t& input_mem){
+void jet_refine(const matrix_t g, wgt_view_t wdeg, wgt_view_t vtx_w, part_vt best_part, refine_data& best_state, bool is_initial, gain_t upper_bound, mem_t& input_mem){
     // contains reusable memory to avoid repeated allocations/deallocations
     // some of this memory contains state information
     mem_t mem(input_mem, g);
@@ -1019,6 +1028,8 @@ void jet_refine(const matrix_t g, wgt_view_t wdeg, part_vt best_part, refine_dat
         Kokkos::deep_copy(best_state.total_deg, wdeg);
         best_state.init = true;
     }
+    wgt_view_t cluster_size("cluster sizes", g.numRows());
+    Kokkos::deep_copy(exec_space(), cluster_size, vtx_w);
     problem prob;
     prob.g = g;
     prob.wdeg = wdeg;
@@ -1050,9 +1061,9 @@ void jet_refine(const matrix_t g, wgt_view_t wdeg, part_vt best_part, refine_dat
                 // use the input graph in place of the conn graph
                 c_graph = g;
             }
-            moves = jet_lp<uniform>(prob, c_graph, part, curr_state, mem, filter_ratio);
+            moves = jet_lp<uniform>(prob, c_graph, part, curr_state, mem, filter_ratio, vtx_w, cluster_size, upper_bound);
             if(moves.extent(0) == 0) break;
-            perform_moves<uniform>(prob, part, moves, mem, curr_state);
+            perform_moves<uniform>(prob, part, moves, mem, curr_state, vtx_w, cluster_size, upper_bound);
             //copy current partition and relevant data to output partition if following conditions pass
             if(curr_state.mod > best_state.mod){
                 copy_refine_data(best_state, curr_state);
