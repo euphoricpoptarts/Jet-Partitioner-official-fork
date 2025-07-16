@@ -39,7 +39,6 @@
 #include "contract.hpp"
 #include "contract_community.hpp"
 #include "jet_refiner_community.hpp"
-#include "memory_store_community.hpp"
 #include "uncoarsen.hpp"
 #include "initial_partition.hpp"
 #include "memory_store.hpp"
@@ -67,7 +66,6 @@ public:
     using clt = typename comm_coarsener_t::coarse_level_triple;
     using stat = part_stat<matrix_t, part_t>;
     using mem_t = memory_store<matrix_t, part_t>;
-    using comm_mem_t = jet_community::memory_store<matrix_t, ordinal_t>;
 
 static wgt_vt degree_weighting(const matrix_t& g){
     wgt_vt vweights("weights", g.numRows());
