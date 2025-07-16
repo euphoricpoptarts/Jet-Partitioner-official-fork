@@ -84,11 +84,10 @@ static void coarsen_vtx_w(wgt_vt in, wgt_vt out, vtx_vt map){
     });
 }
 
-static std::list<coarse_level_triple> louvain_part(matrix_t g, ordinal_t upper, ordinal_t cutoff){
-    using ref_t = jet_community::jet_refiner<matrix_t, ordinal_t>;
+static std::list<coarse_level_triple> louvain_part(matrix_t g, ordinal_t upper, ordinal_t cutoff, mem_t& mem){
+    using ref_t = jet_community::jet_refiner_cluster<matrix_t>;
     using rfd_t = typename ref_t::refine_data;
     using coarse_map = typename coarsener_t::coarse_map;
-    comm_mem_t mem(g);
     clt top;
     top.mtx = g;
     top.wdeg = degree_weighting(g);
@@ -117,7 +116,9 @@ static std::list<coarse_level_triple> louvain_part(matrix_t g, ordinal_t upper, 
             wgt_vt next_input_vtx_w("next input vertex weights", rfd.label_count);
             coarsen_vtx_w(input_vtx_w, next_input_vtx_w, part);
             input_vtx_w = next_input_vtx_w;
-            clt next_clt = contracter.build_coarse_graph(c, part, rfd.label_count, mem);
+            clt next_clt;
+            if(levels.size() == 1) next_clt = contracter.template build_coarse_graph<true>(c, part, rfd.label_count, mem);
+            else next_clt = contracter.template build_coarse_graph<false>(c, part, rfd.label_count, mem);
             next_clt.wdeg = wgt_vt("weighted degree 2", rfd.label_count);
             Kokkos::deep_copy(next_clt.wdeg, rfd.total_deg);
             levels.push_back(next_clt);
@@ -187,7 +188,7 @@ static part_vt partition(scalar_t& edge_cut,
     {
         mem_t mem(g, k);
         std::list<coarse_level_triple> cg_list;
-        if(true) cg_list = louvain_part(g, upper / 4, cutoff);
+        if(true) cg_list = louvain_part(g, upper / 4, cutoff, mem);
         else coarsener.generate_coarse_graphs(g, vweights, mem, experiment, uniform_ew);
         Kokkos::fence();
         double fin_coarsening_time = t.seconds();

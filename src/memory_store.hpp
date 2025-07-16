@@ -3,6 +3,8 @@
 #include <Kokkos_Core.hpp>
 #include "KokkosSparse_CrsMatrix.hpp"
 
+namespace jet_partitioner {
+
 // this struct contains almost all auxiliary memory used by the algorithm
 // this allows for efficient reuse of memory
 template <class crsMat, typename part_t>
@@ -42,28 +44,39 @@ struct memory_store {
         vtx_vt entries;
         part_vt p_entries;
         part_vt sizes;
+        vtx_vt cluster_sizes;
         gain_vt gain_persistent;
+        obj_vt obj_persistent;
+        gain_vt pvals;
         part_vt part, dest_part;
         vtx_vt lock_bit;
+        vtx_vt order1, order2;
         part_vt dest_cache;
+        ordinal_t offset_mid, offset_large;
 
         persistent(const matrix_t largest){
             ordinal_t n = largest.numRows();
             vals = gain_vt(Kokkos::ViewAllocateWithoutInitializing("vals"), largest.nnz());
             entries = vtx_vt(Kokkos::ViewAllocateWithoutInitializing("entries"), largest.nnz());
+            sizes = part_vt(Kokkos::ViewAllocateWithoutInitializing("table sizes"), n);
             if constexpr(std::is_same_v<ordinal_t, part_t>) {
                 // reuse entries view if possible
                 p_entries = entries;
+                cluster_sizes = sizes;
             } else {
                 p_entries = part_vt(Kokkos::ViewAllocateWithoutInitializing("part entries"), largest.nnz());
+                cluster_sizes = vtx_vt(Kokkos::ViewAllocateWithoutInitializing("cluster table sizes"), n);
             }
             row_map = edge_vt(Kokkos::ViewAllocateWithoutInitializing("row map"), n + 1);
-            sizes = part_vt(Kokkos::ViewAllocateWithoutInitializing("table sizes"), n);
             gain_persistent = gain_vt(Kokkos::ViewAllocateWithoutInitializing("gain persistent"), n);
+            obj_persistent = obj_vt(Kokkos::ViewAllocateWithoutInitializing("gain persistent"), n);
+            pvals = gain_vt(Kokkos::ViewAllocateWithoutInitializing("p vals"), n);
             dest_part = part_vt(Kokkos::ViewAllocateWithoutInitializing("destination scratch"), n);
             part = part_vt(Kokkos::ViewAllocateWithoutInitializing("part scratch"), n);
             lock_bit = vtx_vt(Kokkos::ViewAllocateWithoutInitializing("lock bit"), n);
             dest_cache = part_vt(Kokkos::ViewAllocateWithoutInitializing("best connected part for each vertex"), n);
+            order1 = vtx_vt(Kokkos::ViewAllocateWithoutInitializing("vtx ordering 1"), n);
+            order2 = vtx_vt(Kokkos::ViewAllocateWithoutInitializing("vtx ordering 2"), n);
         }
     };
 
@@ -72,7 +85,7 @@ struct memory_store {
         gain_vt gain1, gain2, evict_start, evict_end, evict_fix, evict_diff;
         vtx_vt vtx1, vtx2, zeros1;
         part_vt undersized;
-        vtx_pin_st scan_host;
+        vtx_pin_st scan_host, pin_host;
         gain_pin_st cut_change1, cut_change2, max_part;
         gain_pin_vt reduce_locs;
         part_svt total_undersized;
@@ -90,6 +103,7 @@ struct memory_store {
             vtx2 = vtx_vt(Kokkos::ViewAllocateWithoutInitializing("vtx scratch 2"), std::max(n, min_size));
             zeros1 = vtx_vt("zeros 1", n);
             scan_host = vtx_pin_st("scan host");
+            pin_host = vtx_pin_st("pin host");
             total_undersized = part_svt("total undersized");
             max_vwgt = gain_svt("max vwgt allowed");
             reduce_locs = gain_pin_vt("reduce to here", 3);
@@ -106,3 +120,5 @@ struct memory_store {
         p_mem(largest), 
         s_mem(largest.numRows(), k) {}
 };
+
+}
