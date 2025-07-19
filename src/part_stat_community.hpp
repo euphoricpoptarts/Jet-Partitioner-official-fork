@@ -83,6 +83,7 @@ public:
 struct refine_data {
     gain_vt total_deg;
     scalar_t g_deg = 0;
+    scalar_t v_total = 0;
     gain_t cut = 0;
     // except for this one
     gain_t last_pval = 0;
@@ -158,6 +159,22 @@ static void relabel(part_vt labels){
 	Kokkos::parallel_for("relabel", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i){
 		labels(i) = used(labels(i));
 	});
+}
+
+static double modularity(refine_data& curr_state){
+    double m = 0;
+    const gain_vt total = curr_state.total_deg;
+    Kokkos::parallel_reduce("sum modularity", policy_t(0, total.size()), KOKKOS_LAMBDA(const ordinal_t l, double& update){
+        double total_ratio = static_cast<double>(total(l));
+        update -= total_ratio*total_ratio;
+    }, m);
+    double penalty_factor = 1.0 / static_cast<double>(curr_state.v_total);
+    penalty_factor = penalty*penalty_factor*penalty_factor;
+    m = m*penalty_factor;
+    double inv_gdeg = 1.0 / static_cast<double>(curr_state.g_deg);
+    m += 1.0 - static_cast<double>(curr_state.cut) * inv_gdeg;
+    // std::cout << "Objective " << m << std::endl;
+    return m;
 }
 
 static double modularity(const matrix_t g, const part_vt labels, const ordinal_t label_count, scalar_t g_degree){

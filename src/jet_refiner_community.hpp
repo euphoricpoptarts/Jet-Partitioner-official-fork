@@ -129,6 +129,7 @@ void copy_refine_data(refine_data& lhs, refine_data& rhs){
     Kokkos::deep_copy(exec_space(), lhs.total_deg, rhs.total_deg);
     lhs.g_deg = rhs.g_deg;
     lhs.cut = rhs.cut;
+    lhs.v_total = rhs.v_total;
     lhs.init = rhs.init;
     lhs.mod = rhs.mod;
     lhs.label_count = rhs.label_count;
@@ -185,7 +186,8 @@ vtx_view_t jet_lp(const problem& prob, const matrix_t& c_graph, const part_vt& p
     gain_vt total_deg = rfd.total_deg;
     gain_vt wdeg = prob.wdeg;
     gain_vt pvals = mem.p_mem.pvals;
-    float inv_2m = stat::get_penalty() / static_cast<float>(rfd.g_deg);
+    float inv_2m = stat::get_penalty() * static_cast<float>(rfd.g_deg);
+    inv_2m = inv_2m / (static_cast<float>(rfd.v_total) * static_cast<float>(rfd.v_total));
     vtx_view_t vtx1 = mem.s_mem.vtx1;
     vtx_view_t vtx2 = mem.s_mem.vtx2;
     vtx_view_t order1 = mem.p_mem.order1;
@@ -824,7 +826,7 @@ void perform_moves(const problem& prob, part_vt part, const vtx_view_t swaps, cd
     int64_t cut_change = curr_pval - curr_state.last_pval;
     curr_state.last_pval = curr_pval;
     curr_state.cut -= cut_change;
-    curr_state.mod = stat::modularity(curr_state.g_deg, curr_state.cut, curr_state.total_deg);
+    curr_state.mod = stat::modularity(curr_state);//.g_deg, curr_state.cut, curr_state.total_deg);
 }
 
 void fast_fill(vtx_view_t a, ordinal_t V){
@@ -1028,7 +1030,8 @@ void jet_refine(const matrix_t g, wgt_view_t wdeg, wgt_view_t vtx_w, part_vt bes
     if(!best_state.init){
         best_state.mod = -1.0;
         best_state.total_deg = gain_vt("total degree of clusters", g.numRows());
-        best_state.g_deg = stat::sum(wdeg);
+        best_state.g_deg = g.nnz();//stat::sum(wdeg);
+        best_state.v_total = g.numRows();
         best_state.cut = best_state.g_deg;
         best_state.label_count = g.numRows();
         Kokkos::deep_copy(best_state.total_deg, wdeg);
