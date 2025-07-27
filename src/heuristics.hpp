@@ -43,6 +43,7 @@
 #include "KokkosSparse_CrsMatrix.hpp"
 #include "KokkosGraph_MIS2.hpp"
 #include "experiment_data.hpp"
+#include "coarse_map.h"
 
 namespace jet_partitioner {
 
@@ -77,16 +78,12 @@ public:
     // the problem will be fixed soon, use MaxFirstLoc in meantime
     using argmax_reducer_t = Kokkos::MaxFirstLoc<uint32_t, edge_offset_t, Device>;
     using argmax_t = typename argmax_reducer_t::value_type;
+    using coarse_map_t = coarse_map<vtx_vt>;
     static constexpr ordinal_t ORD_MAX = std::numeric_limits<ordinal_t>::max();
-    static constexpr bool is_host_space = std::is_same<typename exec_space::memory_space, typename Kokkos::DefaultHostExecutionSpace::memory_space>::value;
-
-    struct coarse_map {
-        ordinal_t coarse_vtx;
-        vtx_vt map;
-    };
+    static constexpr bool is_host_space = std::is_same<typename exec_space::memory_space, typename Kokkos::DefaultHostExecutionSpace::memory_space>::value;    
 
     //hn is a list of vertices such that vertex i wants to aggregate with vertex hn(i)
-    ordinal_t parallel_map_construct(vtx_vt vcmap, const ordinal_t n, const vtx_vt vperm, const vtx_vt hn) {
+    static ordinal_t parallel_map_construct(vtx_vt vcmap, const ordinal_t n, const vtx_vt vperm, const vtx_vt hn) {
 
         ordinal_t perm_length = n;
         Kokkos::View<ordinal_t, Device> nvertices_coarse("nvertices");
@@ -168,7 +165,7 @@ public:
         return nc;
     }
 
-    coarse_map coarsen_HEC(const matrix_t& g,
+    coarse_map_t coarsen_HEC(const matrix_t& g,
         const wgt_vt& vtx_w,
         bool uniform_weights,
         pool_t& rand_pool,
@@ -254,7 +251,57 @@ public:
         experiment.addMeasurement(Measurement::MapConstruct, timer.seconds());
         timer.reset();
 
-        coarse_map out;
+        coarse_map_t out;
+        out.coarse_vtx = nc;
+        out.map = vcmap;
+
+        return out;
+    }
+
+    static coarse_map_t coarsen_HEC(const matrix_t& g,
+        vtx_vt part) {
+
+        ordinal_t n = g.numRows();
+        vtx_vt hn("heavies", n);
+        vtx_vt vcmap("vcmap", n);
+        Kokkos::deep_copy(vcmap, ORD_MAX);
+        vtx_vt vperm("vperm", n);
+        Kokkos::parallel_for("initialize vperm", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t i) {
+            vperm(i) = i;
+        });
+
+            Kokkos::parallel_for("Heaviest HN", team_policy_t(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
+                ordinal_t i = thread.league_rank();
+                ordinal_t adj_size = g.graph.row_map(i + 1) - g.graph.row_map(i);
+                if(adj_size > 0){
+                    edge_offset_t end = g.graph.row_map(i + 1);
+                    edge_offset_t start = g.graph.row_map(i);
+                    typename Kokkos::MaxLoc<scalar_t,edge_offset_t,Device>::value_type argmax{0, end};
+                    Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, start, end), [=](const edge_offset_t idx, Kokkos::ValLocScalar<scalar_t,edge_offset_t>& local) {
+                        scalar_t wgt = g.values(idx);
+                        ordinal_t v = g.graph.entries(idx);
+                        if(wgt >= local.val && part(i) == part(v)){
+                            local.val = wgt;
+                            local.loc = idx;
+                        }
+                    
+                    }, Kokkos::MaxLoc<scalar_t, edge_offset_t,Device>(argmax));
+                    Kokkos::single(Kokkos::PerTeam(thread), [=](){
+                        if(argmax.loc >= start && argmax.loc < end){
+                            ordinal_t h = g.graph.entries(argmax.loc);
+                            hn(i) = h;
+                        } else {
+                            hn(i) = i;
+                        }
+                    });
+                } else {
+                    hn(i) = i;
+                }
+            });
+        ordinal_t nc = 0;
+        nc = parallel_map_construct(vcmap, n, vperm, hn);
+
+        coarse_map_t out;
         out.coarse_vtx = nc;
         out.map = vcmap;
 
@@ -274,7 +321,7 @@ public:
     }
 
     template<typename hash_t>
-    void matchHash(const vtx_vt unmappedVtx, const Kokkos::View<hash_t*, Device> hashes, const hash_t nullkey, vtx_vt vcmap){
+    void matchHash(const vtx_vt unmappedVtx, const Kokkos::View<hash_t*, Device> hashes, const hash_t nullkey, vtx_vt vcmap, wgt_vt vtx_w, ordinal_t upper){
         ordinal_t mappable = unmappedVtx.extent(0);
         Kokkos::View<hash_t*, Device> htable(Kokkos::ViewAllocateWithoutInitializing("hashes hash table"), mappable);
         vtx_vt twins(Kokkos::ViewAllocateWithoutInitializing("twin table"), mappable);
@@ -309,8 +356,10 @@ public:
                 } else {
                     if(Kokkos::atomic_compare_exchange(&twins(key), twin, -1) == twin){
                         ordinal_t cv = twin < i ? twin : i;
-                        vcmap(twin) = cv;
-                        vcmap(i) = cv;
+                        if(vtx_w(twin) + vtx_w(i) <= upper){
+                            vcmap(twin) = cv;
+                            vcmap(i) = cv;
+                        }
                         found = true;
                     }
                 }
@@ -327,6 +376,8 @@ public:
         vtx_vt vperm;
         ordinal_t n;
         ordinal_t perm_length;
+        wgt_vt vtx_w;
+        ordinal_t upper;
 
         pickMatch(matrix_t _g,
             vtx_vt _vcmap,
@@ -334,14 +385,18 @@ public:
             pool_t _rand_pool,
             vtx_vt _vperm,
             ordinal_t _n,
-            ordinal_t _perm_length) :
+            ordinal_t _perm_length,
+            wgt_vt _vtx_w,
+            ordinal_t _upper) :
                 g(_g),
                 vcmap(_vcmap),
                 hn(_hn),
                 rand_pool(_rand_pool),
                 vperm(_vperm),
                 n(_n),
-                perm_length(_perm_length) {}
+                perm_length(_perm_length),
+                vtx_w(_vtx_w),
+                upper(_upper) {}
 
         KOKKOS_INLINE_FUNCTION
         void operator()(const member& thread) const {
@@ -360,8 +415,9 @@ public:
             if(!is_uniform){
                 // find max edge weight
                 Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, start, end), [=](const edge_offset_t j, scalar_t& update){
-                    if(!is_initial && vcmap(g.graph.entries(j)) != ORD_MAX) return;
-                    if(g.values(j) > update){
+                    ordinal_t v = g.graph.entries(j);
+                    if(!is_initial && vcmap(v) != ORD_MAX) return;
+                    if(g.values(j) > update && vtx_w(u) + vtx_w(v) <= upper){
                         update = g.values(j);
                     }
                 }, Kokkos::Max<scalar_t, Device>(max_ewt));
@@ -371,9 +427,9 @@ public:
             // select a random adjacent vertex having the max edge weight
             Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, start, end), [=](const edge_offset_t j, argmax_t& local) {
                 //v must be unmatched to be considered
-                if(!is_initial && vcmap(g.graph.entries(j)) != ORD_MAX) return;
-                if(is_uniform || g.values(j) == max_ewt){
-                    uint32_t v = g.graph.entries(j);
+                uint32_t v = g.graph.entries(j);
+                if(!is_initial && vcmap(v) != ORD_MAX) return;
+                if(is_uniform || (g.values(j) == max_ewt  && vtx_w(u) + vtx_w(v) <= upper)){
                     uint32_t tiebreaker = xorshiftHash<uint32_t>(v + r);
                     // >= since 0 must be a valid max val
                     if(tiebreaker >= local.val){
@@ -406,11 +462,11 @@ public:
                 ordinal_t v = g.graph.entries(j);
                 //v must be unmatched to be considered
                 if (is_initial || vcmap(v) == ORD_MAX) {
-                    if (!is_uniform && max_ewt < g.values(j)) {
+                    if (!is_uniform && (max_ewt < g.values(j) && vtx_w(u) + vtx_w(v) <= upper)) {
                         max_ewt = g.values(j);
                         h = v;
                         tiebreaker = xorshiftHash<uint32_t>(v + r);
-                    } else if(is_uniform || max_ewt == g.values(j)){
+                    } else if(is_uniform || (max_ewt == g.values(j) && vtx_w(u) + vtx_w(v) <= upper)){
                         uint32_t sim_wgt = xorshiftHash<uint32_t>(v + r);
                         // >= since 0 must be a valid max tiebreaker
                         if(sim_wgt >= tiebreaker){
@@ -424,9 +480,11 @@ public:
         }
     };
 
-    coarse_map coarsen_match(const matrix_t& g,
+    coarse_map_t coarsen_match(const matrix_t& g,
         const bool uniform_weights, pool_t& rand_pool,
-        const int match_choice) {
+        const int match_choice,
+        wgt_vt vtx_w,
+        const ordinal_t upper) {
 
         ordinal_t n = g.numRows();
 
@@ -449,7 +507,7 @@ public:
             });
         }
         else {
-            pickMatch<true, false> matcher(g, vcmap, hn, rand_pool, vperm, n, n);
+            pickMatch<true, false> matcher(g, vcmap, hn, rand_pool, vperm, n, n, vtx_w, upper);
             if(!is_host_space && g.nnz() / g.numRows() > 32){
                 Kokkos::parallel_for("Potential matches (heavy)", team_policy_t(n, Kokkos::AUTO), matcher);
             } else {
@@ -501,14 +559,14 @@ public:
 
             // find new matches for unmatched vertices
             if(uniform_weights){
-                pickMatch<false, true> matcher(g, vcmap, hn, rand_pool, vperm, n, perm_length);
+                pickMatch<false, true> matcher(g, vcmap, hn, rand_pool, vperm, n, perm_length, vtx_w, upper);
                 if(!is_host_space && g.nnz() / g.numRows() > 32){
                     Kokkos::parallel_for("Potential matches (random)", team_policy_t(perm_length, Kokkos::AUTO), matcher);
                 } else {
                     Kokkos::parallel_for("Potential matches (random)", policy_t(0, perm_length), matcher);
                 }
             } else {
-                pickMatch<false, false> matcher(g, vcmap, hn, rand_pool, vperm, n, perm_length);
+                pickMatch<false, false> matcher(g, vcmap, hn, rand_pool, vperm, n, perm_length, vtx_w, upper);
                 if(!is_host_space && g.nnz() / g.numRows() > 32){
                     Kokkos::parallel_for("Potential matches (heavy)", team_policy_t(perm_length, Kokkos::AUTO), matcher);
                 } else {
@@ -556,7 +614,7 @@ public:
                     hashes(i) = v;
                 });
                 ordinal_t nullkey = ORD_MAX;
-                matchHash<ordinal_t>(unmappedVtx, hashes, nullkey, vcmap);
+                matchHash<ordinal_t>(unmappedVtx, hashes, nullkey, vcmap, vtx_w, upper);
             }
 
             unmapped = countUnmatched(vcmap);
@@ -593,7 +651,7 @@ public:
                     });
                 });
                 uint64_t nullkey = 0;
-                matchHash<uint64_t>(unmappedVtx, hashes, nullkey, vcmap);
+                matchHash<uint64_t>(unmappedVtx, hashes, nullkey, vcmap, vtx_w, upper);
             }
 
             unmapped = countUnmatched(vcmap);
@@ -636,7 +694,7 @@ public:
                     hashes(i) = h;
                 });
                 ordinal_t nullkey = ORD_MAX;
-                matchHash<ordinal_t>(unmappedVtx, hashes, nullkey, vcmap);
+                matchHash<ordinal_t>(unmappedVtx, hashes, nullkey, vcmap, vtx_w, upper);
             }
         }
 
@@ -664,7 +722,7 @@ public:
             }
         });
 
-        coarse_map out;
+        coarse_map_t out;
         out.coarse_vtx = nc;
         out.map = vcmap;
         return out;

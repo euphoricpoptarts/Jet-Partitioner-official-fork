@@ -40,6 +40,8 @@
 #include <cstdlib>
 #include <Kokkos_Core.hpp>
 #include "KokkosSparse_CrsMatrix.hpp"
+#include "coarse_level.h"
+#include "coarse_map.h"
 
 namespace jet_partitioner {
 
@@ -52,9 +54,10 @@ public:
     using ordinal_t = typename matrix_t::ordinal_type;
     using edge_offset_t = typename matrix_t::size_type;
     using scalar_t = typename matrix_t::value_type;
+    using vtx_vt = Kokkos::View<ordinal_t*, Device>;
     using part_vt = Kokkos::View<part_t*, Device>;
     using coarsener_t = contracter<matrix_t>;
-    using clt = typename coarsener_t::coarse_level_triple;
+    using clt = coarse_level<matrix_t>;
 
 //writes a sequence of coarse graphs and mappings between each graph to binary file
 //used to control for coarsening when experimenting with refinement
@@ -78,7 +81,7 @@ static void dump_coarse(std::list<clt> levels){
         fwrite(values.data(), sizeof(scalar_t), M, cgfp);
         fwrite(vtx_wgts.data(), sizeof(scalar_t), N, cgfp);
         if(level.level > 1){
-            typename jet_partitioner::contracter<matrix_t>::coarse_map interp_mtx = level.interp_mtx;
+            coarse_map<vtx_vt> interp_mtx = level.interp_mtx;
             auto i_entries = Kokkos::create_mirror_view_and_copy(Kokkos::HostSpace(), interp_mtx.map);
             fwrite(i_entries.data(), sizeof(ordinal_t), prev_n, cgfp);
         }

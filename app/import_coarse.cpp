@@ -41,14 +41,15 @@
 #include "jet_defs.h"
 #include "memory_store.hpp"
 #include "io.hpp"
+#include "coarse_level.h"
 #include <limits>
 
 using namespace jet_partitioner;
 
 //loads a sequence of coarse graphs and mappings between each graph from binary file
 //used to control for coarsening when experimenting with refinement
-std::list<typename jet_partitioner::contracter<matrix_t>::coarse_level_triple> load_coarse(){
-    using coarse_level_triple = typename jet_partitioner::contracter<matrix_t>::coarse_level_triple;
+std::list<coarse_level<matrix_t>> load_coarse(){
+    using coarse_level_triple = coarse_level<matrix_t>;
     std::list<coarse_level_triple> levels;
     std::list<coarse_level_triple> error_levels;
     FILE* cgfp = fopen("coarse_graphs.out", "r");
@@ -88,7 +89,7 @@ std::list<typename jet_partitioner::contracter<matrix_t>::coarse_level_triple> l
             auto i_entries_m = Kokkos::create_mirror_view(i_entries);
             if(fread(i_entries_m.data(), sizeof(ordinal_t), prev_n, cgfp) != static_cast<size_t>(prev_n)) return error_levels;
             Kokkos::deep_copy(i_entries, i_entries_m);
-            typename jet_partitioner::contracter<matrix_t>::coarse_map i_g;
+            coarse_level_triple::coarse_map_t i_g;
             i_g.coarse_vtx = N;
             i_g.map = i_entries;
             level.interp_mtx = i_g;
@@ -117,7 +118,7 @@ part_vt partition(value_t& edge_cut,
 
     using coarsener_t = contracter<matrix_t>;
     using uncoarsener_t = uncoarsener<matrix_t, part_t>;
-    using coarse_level_triple = typename coarsener_t::coarse_level_triple;
+    using coarse_level_triple = coarse_level<matrix_t>;
     using mem_t = memory_store<matrix_t, part_t>;
 
     std::list<coarse_level_triple> cg_list = load_coarse();

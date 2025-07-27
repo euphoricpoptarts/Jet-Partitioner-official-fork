@@ -46,6 +46,8 @@
 #include "experiment_data.hpp"
 #include "heuristics.hpp"
 #include "memory_store.hpp"
+#include "coarse_map.h"
+#include "coarse_level.h"
 
 namespace jet_partitioner {
 
@@ -69,7 +71,8 @@ public:
     using team_policy_t = Kokkos::TeamPolicy<exec_space>;
     using member = typename team_policy_t::member_type;
     using pool_t = Kokkos::Random_XorShift64_Pool<Device>;
-    using coarse_map = typename coarsen_heuristics<matrix_t>::coarse_map;
+    using coarse_map_t = coarse_map<vtx_vt>;
+    using coarse_level_t = coarse_level<matrix_t>;
     using mem_t = memory_store<matrix_t, int>;
     static constexpr ordinal_t get_null_val() {
         // this value must line up with the null value used by the hashmap
@@ -82,15 +85,6 @@ public:
     }
     static constexpr ordinal_t NULL_KEY  = get_null_val();
     static constexpr bool is_host_space = std::is_same<typename exec_space::memory_space, typename Kokkos::DefaultHostExecutionSpace::memory_space>::value;
-    // contains matrix and vertex weights corresponding to current level
-    // interp matrix maps previous level to this level
-    struct coarse_level_triple {
-        matrix_t mtx;
-        wgt_vt vtx_w;
-        coarse_map interp_mtx;
-        int level;
-        bool uniform_weights = false;
-    };
 
     // define behavior-controlling enums
     enum Heuristic { HECv1, HECv2, HECv3, Match, MtMetis };
@@ -340,8 +334,8 @@ struct consolidateUnique {
     }
 };
 
-coarse_level_triple build_coarse_graph(const coarse_level_triple level,
-    const coarse_map vcmap,
+coarse_level_t build_coarse_graph(const coarse_level_t level,
+    const coarse_map_t vcmap,
     mem_t& mem,
     experiment_data<scalar_t>& experiment) {
 
@@ -429,7 +423,7 @@ coarse_level_triple build_coarse_graph(const coarse_level_triple level,
     }
     graph_type gc_graph(entries_coarse, coarse_row_map_f);
     matrix_t gc("gc", nc, wgts_coarse, gc_graph);
-    coarse_level_triple next_level;
+    coarse_level_t next_level;
     next_level.mtx = gc;
     next_level.vtx_w = c_vtx_w;
     next_level.level = level.level + 1;
@@ -441,14 +435,15 @@ coarse_level_triple build_coarse_graph(const coarse_level_triple level,
     return next_level;
 }
 
-coarse_map generate_coarse_mapping(const matrix_t g,
+coarse_map_t generate_coarse_mapping(const matrix_t g,
     const wgt_vt& vtx_w,
     bool uniform_weights,
     pool_t& rand_pool,
-    experiment_data<scalar_t>& experiment) {
+    experiment_data<scalar_t>& experiment,
+    ordinal_t upper) {
 
     Kokkos::Timer timer;
-    coarse_map interpolation_graph;
+    coarse_map_t interpolation_graph;
     int choice = 0;
 
     switch (h) {
@@ -479,7 +474,7 @@ coarse_map generate_coarse_mapping(const matrix_t g,
             break;
         case Match:
         case MtMetis:
-            interpolation_graph = mapper.coarsen_match(g, uniform_weights, rand_pool, choice);
+            interpolation_graph = mapper.coarsen_match(g, uniform_weights, rand_pool, choice, vtx_w, upper);
             break;
     }
     Kokkos::fence();
@@ -487,9 +482,9 @@ coarse_map generate_coarse_mapping(const matrix_t g,
     return interpolation_graph;
 }
 
-std::list<coarse_level_triple> generate_coarse_graphs(const matrix_t fine_g, const wgt_vt vweights, mem_t& mem, experiment_data<scalar_t>& experiment, bool uniform_eweights = false) {
-    std::list<coarse_level_triple> levels;
-    coarse_level_triple finest;
+std::list<coarse_level_t> generate_coarse_graphs(const matrix_t fine_g, const wgt_vt vweights, mem_t& mem, experiment_data<scalar_t>& experiment, ordinal_t upper, bool uniform_eweights = false) {
+    std::list<coarse_level_t> levels;
+    coarse_level_t finest;
     finest.mtx = fine_g;
     //1-indexed, not zero indexed
     finest.level = 1;
@@ -499,16 +494,16 @@ std::list<coarse_level_triple> generate_coarse_graphs(const matrix_t fine_g, con
     pool_t rand_pool(std::time(nullptr));
     while (levels.rbegin()->mtx.numRows() > coarse_vtx_cutoff) {
 
-        coarse_level_triple current_level = *levels.rbegin();
+        coarse_level_t current_level = *levels.rbegin();
 
-        coarse_map interp_graph = generate_coarse_mapping(current_level.mtx, current_level.vtx_w, current_level.uniform_weights, rand_pool, experiment);
+        coarse_map_t interp_graph = generate_coarse_mapping(current_level.mtx, current_level.vtx_w, current_level.uniform_weights, rand_pool, experiment, upper);
 
-        if (interp_graph.coarse_vtx < min_allowed_vtx) {
+        if (interp_graph.coarse_vtx < min_allowed_vtx || interp_graph.coarse_vtx >= 0.9*current_level.mtx.numRows()) {
             break;
         }
 
         Kokkos::Timer timer;
-        coarse_level_triple next_level = build_coarse_graph(current_level, interp_graph, mem, experiment);
+        coarse_level_t next_level = build_coarse_graph(current_level, interp_graph, mem, experiment);
         Kokkos::fence();
         experiment.addMeasurement(Measurement::Build, timer.seconds());
         timer.reset();

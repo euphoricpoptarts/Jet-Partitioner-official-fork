@@ -37,12 +37,12 @@
 //
 // ************************************************************************
 #include "jet_refiner.hpp"
-#include "contract.hpp"
 #include "jet_config.h"
 #include <Kokkos_Core.hpp>
 #include "KokkosSparse_CrsMatrix.hpp"
 #include "part_stat.hpp"
 #include "binary_dump.hpp"
+#include "coarse_level.h"
 
 namespace jet_partitioner {
 
@@ -58,8 +58,7 @@ public:
     using vtx_vt = Kokkos::View<ordinal_t*, Device>;
     using part_vt = Kokkos::View<part_t*, Device>;
     using policy_t = Kokkos::RangePolicy<exec_space>;
-    using coarsener_t = contracter<matrix_t>;
-    using clt = typename coarsener_t::coarse_level_triple;
+    using clt = coarse_level<matrix_t>;
     using ref_t = jet_refiner<matrix_t, part_t>; 
     using rfd_t = typename ref_t::refine_data;
     using gain_t = typename ref_t::gain_t;
