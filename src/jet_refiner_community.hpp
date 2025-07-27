@@ -471,6 +471,11 @@ vtx_view_t fix_oversized(const problem& prob, part_vt part, mem_t& mem, wgt_view
     }
     ordinal_t sections = max_sections;
     ordinal_t t_minibuckets = max_buckets*total_oversized*sections;
+    if(t_minibuckets > n) {
+        sections = n / (max_buckets*total_oversized);
+        if(sections == 0) sections = 1;
+        t_minibuckets = max_buckets*total_oversized*sections;
+    }
     gain_vt pvals = mem.p_mem.pvals;
     gain_vt bucket_offsets = Kokkos::subview(mem.s_mem.gain1, std::make_pair(static_cast<ordinal_t>(0), t_minibuckets));
     Kokkos::deep_copy(exec_space(), bucket_offsets, 0);
@@ -497,7 +502,7 @@ vtx_view_t fix_oversized(const problem& prob, part_vt part, mem_t& mem, wgt_view
     });
     ordinal_t width = max_buckets*sections;
     ordinal_t num_moves = 0;
-    Kokkos::parallel_scan("filter scores below cutoff", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
+    Kokkos::parallel_scan("filter scores below limit", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
         ordinal_t b = bid(i);
         ordinal_t p = part(i);
         ordinal_t idx = oversized_idx(p);
@@ -530,7 +535,6 @@ vtx_view_t fix_oversized(const problem& prob, part_vt part, mem_t& mem, wgt_view
         }
     }, total_oversized);
     vtx_view_t new_clusters = mem.s_mem.vtx3;
-    ordinal_t total_empty = 0;
     // identify unused cluster ids
     Kokkos::parallel_scan("compute destinations", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
         if(cluster_size(i) == 0){
@@ -541,14 +545,13 @@ vtx_view_t fix_oversized(const problem& prob, part_vt part, mem_t& mem, wgt_view
             }
             update++;
         }
-    }, total_empty);
+    });
     Kokkos::parallel_for("assign new part", policy_t(0, num_moves), KOKKOS_LAMBDA(const ordinal_t x){
         ordinal_t v = only_moves(x);
         ordinal_t idx = oversized_idx(part(v));
         ordinal_t offset = vscore(v) / upper_bound;
         dest_part(v) = new_clusters(idx + offset);
     });
-    // std::cout << "Total moves: " << num_moves << "; total empty clusters: " << total_empty << std::endl;
     return only_moves;
 }
 

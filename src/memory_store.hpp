@@ -56,8 +56,8 @@ struct memory_store {
 
         persistent(const matrix_t largest){
             ordinal_t n = largest.numRows();
-            vals = gain_vt(Kokkos::ViewAllocateWithoutInitializing("vals"), largest.nnz());
-            entries = vtx_vt(Kokkos::ViewAllocateWithoutInitializing("entries"), largest.nnz());
+            vals = gain_vt(Kokkos::ViewAllocateWithoutInitializing("vals"), largest.nnz()*1.2);
+            entries = vtx_vt(Kokkos::ViewAllocateWithoutInitializing("entries"), largest.nnz()*1.2);
             sizes = part_vt(Kokkos::ViewAllocateWithoutInitializing("table sizes"), n);
             if constexpr(std::is_same_v<ordinal_t, part_t>) {
                 // reuse entries view if possible
