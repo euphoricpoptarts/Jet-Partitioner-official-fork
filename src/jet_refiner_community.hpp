@@ -202,7 +202,7 @@ static ordinal_t gain_bucket(const gain_t& gx, const scalar_t& vwgt){
                 gain /= 1.5;
                 gain_type++;
             }
-            if(gain_type > max_buckets){
+            if(gain_type >= max_buckets){
                 gain_type = max_buckets - 1;
             }
         }
@@ -228,6 +228,7 @@ vtx_view_t jet_lp(const problem& prob, const matrix_t& c_graph, const part_vt& p
     vtx_view_t vtx1 = mem.s_mem.vtx1;
     vtx_view_t vtx2 = mem.s_mem.vtx2;
     vtx_view_t order1 = mem.p_mem.order1;
+    vtx_view_t dead_bit = mem.p_mem.lock_bit;
     ordinal_t big_begin = mem.p_mem.offset_large;
     vtx_view_t small_tables = Kokkos::subview(order1, std::make_pair(static_cast<ordinal_t>(0), big_begin));
     vtx_view_t large_tables = Kokkos::subview(order1, std::make_pair(big_begin, n));
@@ -252,7 +253,7 @@ vtx_view_t jet_lp(const problem& prob, const matrix_t& c_graph, const part_vt& p
             gain_t j_val = c_graph.values(j);
             if(j_val > 0 && j_val >= b_conn){
                 part_t px = c_graph.graph.entries(j);
-                // if(cluster_size(px) + vtx_w(i) > upper_bound) continue;
+                if(dead_bit(px)) continue;
                 float j_conn = j_val - static_cast<float>(total_deg(px))*multi;
                 if(j_conn >= b_conn){
                     b_conn = j_conn;
@@ -290,7 +291,7 @@ vtx_view_t jet_lp(const problem& prob, const matrix_t& c_graph, const part_vt& p
                 gain_t j_val = c_graph.values(j);
                 if(j_val > 0 && j_val >= maxl){
                     part_t px = c_graph.graph.entries(j);
-                    // if(cluster_size(px) + vtx_w(i) > upper_bound) continue;
+                    if(dead_bit(px)) continue;
                     float j_conn = j_val - static_cast<float>(total_deg(px))*multi;
                     if(j_conn >= maxl){
                         // this is not deterministic unless the case j_conn == maxl is handled properly
@@ -333,7 +334,7 @@ vtx_view_t jet_lp(const problem& prob, const matrix_t& c_graph, const part_vt& p
         }
         ordinal_t i = order1(x);
         part_t best = dest_part(i);
-        if(best != NO_MOVE){
+        if(best != NO_MOVE && dead_bit(i) == 0){
             if(final){
                 vtx1(update) = i;
             }
@@ -454,9 +455,10 @@ vtx_view_t fix_oversized(const problem& prob, part_vt part, mem_t& mem, wgt_view
     vtx_view_t oversized_idx = mem.s_mem.vtx1;
     vtx_view_t moves = mem.s_mem.vtx2;
     vtx_view_t bid = mem.s_mem.vtx3;
+    vtx_view_t dead_bit = mem.p_mem.lock_bit;
     ordinal_t total_oversized = 0;
     Kokkos::parallel_scan("compute oversized idx", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
-        if(cluster_size(i) > upper_bound){
+        if(cluster_size(i) > upper_bound && dead_bit(i) == 0){
             if(final){
                 oversized_idx(i) = update;
             }
@@ -509,11 +511,11 @@ vtx_view_t fix_oversized(const problem& prob, part_vt part, mem_t& mem, wgt_view
         if(idx == -1) return;
         ordinal_t begin_bucket = idx*width;
         gain_t score = vscore(i) + bucket_offsets(b) - bucket_offsets(begin_bucket);
-        if(final) vscore(i) = score;
         gain_t limit = cluster_size(p) - upper_bound;
         if(score < limit){
             if(final){
                 moves(update) = i;
+                vscore(i) = score;
             }
             update++;
         }
@@ -523,7 +525,7 @@ vtx_view_t fix_oversized(const problem& prob, part_vt part, mem_t& mem, wgt_view
     // compute number of new clusters needed
     // evicted vertices are sent to new clusters broken off from original cluster
     Kokkos::parallel_scan("compute oversized idx", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
-        if(cluster_size(i) > upper_bound){
+        if(cluster_size(i) > upper_bound && dead_bit(i) == 0){
             if(final){
                 oversized_idx(i) = update;
             }
@@ -550,7 +552,8 @@ vtx_view_t fix_oversized(const problem& prob, part_vt part, mem_t& mem, wgt_view
         ordinal_t v = only_moves(x);
         ordinal_t idx = oversized_idx(part(v));
         ordinal_t offset = vscore(v) / upper_bound;
-        dest_part(v) = new_clusters(idx + offset);
+        ordinal_t read = idx + offset;
+        dest_part(v) = new_clusters(read);
     });
     return only_moves;
 }
@@ -1189,6 +1192,11 @@ void jet_refine(const matrix_t g, wgt_view_t wdeg, wgt_view_t vtx_w, part_vt bes
     }
     wgt_view_t cluster_size("cluster sizes", g.numRows());
     Kokkos::deep_copy(exec_space(), cluster_size, vtx_w);
+    // vertices that are oversized before clustering can not join any clusters, nor can their cluster be joined
+    Kokkos::parallel_for("lock overwgt", policy_t(0, g.numRows()), KOKKOS_LAMBDA(const ordinal_t i){
+        if(vtx_w(i) > upper_bound) mem.p_mem.lock_bit(i) = 1;
+        else mem.p_mem.lock_bit(i) = 0;
+    });
     problem prob;
     prob.g = g;
     prob.wdeg = wdeg;
