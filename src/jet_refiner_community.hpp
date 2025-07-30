@@ -223,8 +223,7 @@ vtx_view_t jet_lp(const problem& prob, const matrix_t& c_graph, const part_vt& p
     gain_vt total_deg = rfd.total_deg;
     gain_vt wdeg = prob.wdeg;
     gain_vt pvals = mem.p_mem.pvals;
-    float inv_2m = stat::get_penalty() * static_cast<float>(rfd.g_deg);
-    inv_2m = inv_2m / (static_cast<float>(rfd.v_total) * static_cast<float>(rfd.v_total));
+    float penalty_mod = stat::get_penalty_modifier(rfd);
     vtx_view_t vtx1 = mem.s_mem.vtx1;
     vtx_view_t vtx2 = mem.s_mem.vtx2;
     vtx_view_t order1 = mem.p_mem.order1;
@@ -241,7 +240,7 @@ vtx_view_t jet_lp(const problem& prob, const matrix_t& c_graph, const part_vt& p
         }
         part_t best = NO_MOVE;
         float wd = wdeg(i);
-        float multi = wd*inv_2m;
+        float multi = wd*penalty_mod;
         part_t p = part(i);
         float p_conn = pvals(i) - (total_deg(p) - wd)*multi;
         // b_conn must be at least this value to pass filter
@@ -278,7 +277,7 @@ vtx_view_t jet_lp(const problem& prob, const matrix_t& c_graph, const part_vt& p
             }
             ordinal_t team_size = t.team_size();
             float wd = wdeg(i);
-            float multi = wd*inv_2m;
+            float multi = wd*penalty_mod;
             edge_offset_t start = c_graph.graph.row_map(i);
             edge_offset_t end = c_graph.graph.row_map(i+1);
             part_t p = part(i);
@@ -365,7 +364,7 @@ vtx_view_t jet_lp(const problem& prob, const matrix_t& c_graph, const part_vt& p
         part_t best = dest_part(i);
         part_t p = part(i);
         float wd = prob.wdeg(i);
-        float multi = wd*inv_2m;
+        float multi = wd*penalty_mod;
         float igain = pregain(i);
         ordinal_t hi = hash(i);
         Kokkos::parallel_reduce(Kokkos::TeamThreadRange(t, g.graph.row_map(i), g.graph.row_map(i + 1)), [&](const edge_offset_t j, float& update){
@@ -397,7 +396,7 @@ vtx_view_t jet_lp(const problem& prob, const matrix_t& c_graph, const part_vt& p
         part_t best = dest_part(i);
         part_t p = part(i);
         float wd = prob.wdeg(i);
-        float multi = wd*inv_2m;
+        float multi = wd*penalty_mod;
         float igain = pregain(i);
         ordinal_t hi = hash(i);
         for(edge_offset_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++){
@@ -523,7 +522,7 @@ vtx_view_t fix_oversized(const problem& prob, part_vt part, mem_t& mem, wgt_view
     vtx_view_t only_moves = Kokkos::subview(moves, std::make_pair(static_cast<ordinal_t>(0), num_moves));
     part_vt dest_part = mem.p_mem.dest_part;
     // compute number of new clusters needed
-    // evicted vertices are sent to new clusters broken off from original cluster
+    // evicted vertices are sent to "overflow" clusters created for each oversized cluster
     Kokkos::parallel_scan("compute oversized idx", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
         if(cluster_size(i) > upper_bound && dead_bit(i) == 0){
             if(final){
@@ -541,9 +540,7 @@ vtx_view_t fix_oversized(const problem& prob, part_vt part, mem_t& mem, wgt_view
     Kokkos::parallel_scan("compute destinations", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
         if(cluster_size(i) == 0){
             if(final){
-                if(update < total_oversized){
-                    new_clusters(update) = i;
-                }
+                new_clusters(update) = i;
             }
             update++;
         }

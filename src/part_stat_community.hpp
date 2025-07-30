@@ -77,7 +77,7 @@ public:
     using team_policy_t = Kokkos::TeamPolicy<exec_space>;
     using member = typename team_policy_t::member_type;
     static constexpr bool is_host_space = std::is_same<typename exec_space::memory_space, typename Kokkos::DefaultHostExecutionSpace::memory_space>::value;
-    static constexpr double penalty = 1.0;
+    static constexpr double penalty_scale = 2.0;
 
 // metadata that is preserved between levels in the multilevel scheme
 struct refine_data {
@@ -139,8 +139,11 @@ static ordinal_t get_total_labels(const part_vt labels){
 	return total;
 }
 
-static double get_penalty() {
-    return penalty;
+static double get_penalty_modifier(const refine_data& curr_state) {
+    double modifier = penalty_scale * static_cast<float>(curr_state.g_deg);
+    double inv_vtot = 1.0 / static_cast<float>(curr_state.v_total);
+    modifier = modifier * inv_vtot * inv_vtot;
+    return modifier;
 }
 
 static void relabel(part_vt labels){
@@ -169,7 +172,7 @@ static double modularity(refine_data& curr_state){
         update -= total_ratio*total_ratio;
     }, m);
     double penalty_factor = 1.0 / static_cast<double>(curr_state.v_total);
-    penalty_factor = penalty*penalty_factor*penalty_factor;
+    penalty_factor = penalty_scale*penalty_factor*penalty_factor;
     m = m*penalty_factor;
     double inv_gdeg = 1.0 / static_cast<double>(curr_state.g_deg);
     m += 1.0 - static_cast<double>(curr_state.cut) * inv_gdeg;
@@ -197,7 +200,7 @@ static double modularity(const matrix_t g, const part_vt labels, const ordinal_t
     Kokkos::parallel_reduce("sum modularity", policy_t(0, label_count), KOKKOS_LAMBDA(const ordinal_t l, double& update){
         double internal_ratio = static_cast<double>(internal(l)) / static_cast<double>(g_degree);
         double total_ratio = static_cast<double>(total(l)) / static_cast<double>(g_degree);
-        double l_mod = internal_ratio - penalty*(total_ratio*total_ratio);
+        double l_mod = internal_ratio - penalty_scale*(total_ratio*total_ratio);
         update += l_mod;
     }, m);
     return m;
@@ -210,7 +213,7 @@ static double modularity(const scalar_t g_degree, const scalar_t cutsize, const 
         update -= total_ratio*total_ratio;
     }, m);
     double inv_gdeg = 1.0 / static_cast<double>(g_degree);
-    m = m*penalty*inv_gdeg*inv_gdeg;
+    m = m*penalty_scale*inv_gdeg*inv_gdeg;
     m += 1.0 - static_cast<double>(cutsize) * inv_gdeg;
     return m;
 }
