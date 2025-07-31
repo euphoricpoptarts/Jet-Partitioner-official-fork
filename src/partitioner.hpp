@@ -41,7 +41,6 @@
 #include "jet_refiner_community.hpp"
 #include "uncoarsen.hpp"
 #include "initial_partition.hpp"
-#include "part_stat_community.hpp"
 #include "memory_store.hpp"
 #include "coarse_level.h"
 #include "coarse_map.h"
@@ -68,7 +67,6 @@ public:
     using uncoarsener_t = uncoarsener<matrix_t, part_t>;
     using coarse_level_t = coarse_level<matrix_t>;
     using stat = part_stat<matrix_t, part_t>;
-    using cstat = jet_community::part_stat<matrix_t, ordinal_t>;
     using mem_t = memory_store<matrix_t, part_t>;
 
 static wgt_vt degree_weighting(const matrix_t& g){
