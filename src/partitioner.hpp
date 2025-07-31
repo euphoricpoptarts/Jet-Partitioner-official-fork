@@ -45,6 +45,7 @@
 #include "memory_store.hpp"
 #include "coarse_level.h"
 #include "coarse_map.h"
+#include "cluster_data.h"
 
 namespace jet_partitioner {
 
@@ -87,7 +88,7 @@ static void coarsen_vtx_w(wgt_vt in, wgt_vt out, vtx_vt map){
 
 static std::list<coarse_level_t> louvain_part(matrix_t g, wgt_vt input_vtx_w, ordinal_t upper, ordinal_t cutoff, mem_t& mem, bool uniform_ew){
     using ref_t = jet_community::jet_refiner_cluster<matrix_t>;
-    using rfd_t = typename ref_t::refine_data;
+    using rfd_t = cluster_data<matrix_t>;
     using coarse_map = coarse_map<vtx_vt>;
     coarse_level_t top;
     top.mtx = g;
@@ -99,9 +100,9 @@ static std::list<coarse_level_t> louvain_part(matrix_t g, wgt_vt input_vtx_w, or
     Kokkos::deep_copy(top.wdeg, top.vtx_w);
     std::list<coarse_level_t> levels;
     levels.push_back(top);
-    rfd_t rfd;
-    rfd.init = false;
+    rfd_t rfd(top.mtx, top.wdeg, 2.0, top.uniform_weights);
     ref_t refiner;
+    bool bump = true;
     while(true) {
         coarse_level_t c = levels.back();
         vtx_vt part("cluster assignments", c.mtx.numRows());
@@ -110,7 +111,9 @@ static std::list<coarse_level_t> louvain_part(matrix_t g, wgt_vt input_vtx_w, or
         });
         if(c.uniform_weights) refiner.template jet_refine<true>(c.mtx, c.wdeg, c.vtx_w, part, rfd, true, upper, mem);
         else refiner.template jet_refine<false>(c.mtx, c.wdeg, c.vtx_w, part, rfd, true, upper, mem);
-        coarse_map cm = coarsen_heuristics<matrix_t>::coarsen_HEC(c.mtx, part);
+        coarse_map cm;
+        if(c.uniform_weights) cm = coarsen_heuristics<matrix_t>::template coarsen_HEC<true>(c.mtx, part);
+        else cm = coarsen_heuristics<matrix_t>::template coarsen_HEC<false>(c.mtx, part);
         // cm.map = part;
         // cm.coarse_vtx = rfd.label_count;
         if(cm.coarse_vtx < 0.9*c.mtx.numRows() && cm.coarse_vtx >= cutoff){
@@ -120,20 +123,22 @@ static std::list<coarse_level_t> louvain_part(matrix_t g, wgt_vt input_vtx_w, or
             else next_clt = contracter.template build_coarse_graph<false>(c, cm.map, cm.coarse_vtx, mem);
             next_clt.vtx_w = wgt_vt("next input vertex weights", cm.coarse_vtx);
             coarsen_vtx_w(c.vtx_w, next_clt.vtx_w, cm.map);
-            next_clt.wdeg = wgt_vt("weighted degree 2", cm.coarse_vtx);
-            coarsen_vtx_w(c.wdeg, next_clt.wdeg, cm.map);
+            next_clt.wdeg = next_clt.vtx_w; // wgt_vt("weighted degree 2", cm.coarse_vtx);
+            // coarsen_vtx_w(c.wdeg, next_clt.wdeg, cm.map);
             next_clt.interp_mtx = cm;
             next_clt.level = c.level + 1;
             next_clt.uniform_weights = false;
 
-            // update rfd
-            rfd.total_deg = wgt_vt("total deg", cm.coarse_vtx);
-            Kokkos::deep_copy(rfd.total_deg, next_clt.wdeg);
-            rfd.cut = cstat::sum(next_clt.mtx.values);
-            rfd.label_count = cm.coarse_vtx;
-            rfd.mod = cstat::modularity(rfd);
+            // need to update because of hec
+            rfd.update(next_clt.mtx, next_clt.wdeg);
 
             levels.push_back(next_clt);
+        } else if(cm.coarse_vtx > cutoff && bump) {
+            upper *= 2;
+            bump = false;
+
+            // need to reset to state prior to refinement
+            rfd.update(c.mtx, c.wdeg);
         } else {
             break;
         }

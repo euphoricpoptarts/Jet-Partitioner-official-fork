@@ -44,7 +44,7 @@
 #include <Kokkos_Core.hpp>
 #include "KokkosSparse_CrsMatrix.hpp"
 #include "memory_store.hpp"
-#include "part_stat_community.hpp"
+#include "cluster_data.h"
 
 namespace jet_community {
 
@@ -88,8 +88,7 @@ public:
     using dyn_policy_t = Kokkos::RangePolicy<Kokkos::Schedule<Kokkos::Dynamic>, exec_space>;
     using dyn_team_policy_t = Kokkos::TeamPolicy<Kokkos::Schedule<Kokkos::Dynamic>, exec_space>;
     using member = typename team_policy_t::member_type;
-    using stat = jet_community::part_stat<matrix_t, part_t>;
-    using refine_data = typename stat::refine_data;
+    using refine_data = cluster_data<matrix_t>;
     using mem_t = jet_partitioner::memory_store<matrix_t, part_t>;
     static constexpr ordinal_t ORD_MAX = std::numeric_limits<ordinal_t>::max();
     static constexpr float OBJ_MIN = std::numeric_limits<float>::lowest();
@@ -129,23 +128,6 @@ struct cdata_t {
     bool init = false;
 };
 
-void copy_refine_data(refine_data& lhs, refine_data& rhs){
-    Kokkos::deep_copy(exec_space(), lhs.total_deg, rhs.total_deg);
-    lhs.g_deg = rhs.g_deg;
-    lhs.cut = rhs.cut;
-    lhs.v_total = rhs.v_total;
-    lhs.init = rhs.init;
-    lhs.mod = rhs.mod;
-    lhs.label_count = rhs.label_count;
-}
-
-refine_data clone_refine_data(refine_data& rhs){
-    refine_data clone;
-    clone.total_deg = gain_vt(Kokkos::ViewAllocateWithoutInitializing("total degree of clusters"), rhs.total_deg.extent(0));
-    copy_refine_data(clone, rhs);
-    return clone;
-}
-
 void relabel_contiguously(part_vt labels, refine_data& rfd, mem_t& mem){
 	ordinal_t n = labels.extent(0);
     ordinal_t initial_count = rfd.label_count;
@@ -166,11 +148,12 @@ void relabel_contiguously(part_vt labels, refine_data& rfd, mem_t& mem){
 	Kokkos::parallel_for("relabel", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i){
 		labels(i) = used(labels(i));
 	});
-    gain_vt total_deg("new total degree", t_labels);
+    wgt_view_t total_deg("new total degree", t_labels);
+    wgt_view_t old_total_deg = rfd.total_deg;
     Kokkos::parallel_for("relabel degrees", policy_t(0, initial_count), KOKKOS_LAMBDA(const ordinal_t i){
-		if(rfd.total_deg(i) > 0){
+		if(old_total_deg(i) > 0){
             ordinal_t relabeled = used(i);
-            total_deg(relabeled) = rfd.total_deg(i);
+            total_deg(relabeled) = old_total_deg(i);
         }
 	});
     rfd.total_deg = total_deg;
@@ -223,7 +206,7 @@ vtx_view_t jet_lp(const problem& prob, const matrix_t& c_graph, const part_vt& p
     gain_vt total_deg = rfd.total_deg;
     gain_vt wdeg = prob.wdeg;
     gain_vt pvals = mem.p_mem.pvals;
-    float penalty_mod = stat::get_penalty_modifier(rfd);
+    float penalty_mod = rfd.get_penalty_modifier();
     vtx_view_t vtx1 = mem.s_mem.vtx1;
     vtx_view_t vtx2 = mem.s_mem.vtx2;
     vtx_view_t order1 = mem.p_mem.order1;
@@ -945,13 +928,14 @@ void perform_moves(const problem& prob, part_vt part, const vtx_view_t swaps, cd
     vtx_view_t dest_part = Kokkos::subview(mem.p_mem.dest_part, std::make_pair(static_cast<ordinal_t>(0), prob.g.numRows()));
     ordinal_t total_moves = swaps.extent(0);
     gain_vt pvals = mem.p_mem.pvals;
+    wgt_view_t total_deg = curr_state.total_deg;
     Kokkos::parallel_for("update total deg", policy_t(0, total_moves), KOKKOS_LAMBDA(const ordinal_t& x){
         ordinal_t i = swaps(x);
         part_t best = dest_part(i);
         part_t p = part(i);
         Kokkos::atomic_add(&cluster_size(best), vtx_w(i));
-        Kokkos::atomic_add(&curr_state.total_deg(p), -wdeg(i));
-        Kokkos::atomic_add(&curr_state.total_deg(best), wdeg(i));
+        Kokkos::atomic_add(&total_deg(p), -wdeg(i));
+        Kokkos::atomic_add(&total_deg(best), wdeg(i));
         Kokkos::atomic_add(&cluster_size(p), -vtx_w(i));
     });
     //change part assignments and update part sizes
@@ -973,10 +957,10 @@ void perform_moves(const problem& prob, part_vt part, const vtx_view_t swaps, cd
         update_small<uniform>(prob, part, swaps, dest_part, cdata, mem);
     }
     gain_t curr_pval = pval_sum(pvals, prob.g.numRows());
-    int64_t cut_change = curr_pval - curr_state.last_pval;
+    gain_t cut_change = curr_pval - curr_state.last_pval;
     curr_state.last_pval = curr_pval;
     curr_state.cut -= cut_change;
-    curr_state.mod = stat::modularity(curr_state);//.g_deg, curr_state.cut, curr_state.total_deg);
+    curr_state.obj = curr_state.objective();
 }
 
 void fast_fill(vtx_view_t a, ordinal_t V){
@@ -1176,17 +1160,6 @@ cdata_t truncate_and_init_mem(mem_t& mem, problem& prob, int label_count, bool t
 
 template <bool uniform>
 void jet_refine(const matrix_t g, wgt_view_t wdeg, wgt_view_t vtx_w, part_vt best_part, refine_data& best_state, bool is_initial, gain_t upper_bound, mem_t& mem){
-    // initialize metadata
-    if(!best_state.init){
-        best_state.mod = -1.0;
-        best_state.total_deg = gain_vt("total degree of clusters", g.numRows());
-        best_state.g_deg = g.nnz();//stat::sum(wdeg);
-        best_state.v_total = g.numRows();
-        best_state.cut = best_state.g_deg;
-        best_state.label_count = g.numRows();
-        Kokkos::deep_copy(best_state.total_deg, wdeg);
-        best_state.init = true;
-    }
     wgt_view_t cluster_size("cluster sizes", g.numRows());
     Kokkos::deep_copy(exec_space(), cluster_size, vtx_w);
     // vertices that are oversized before clustering can not join any clusters, nor can their cluster be joined
@@ -1198,7 +1171,7 @@ void jet_refine(const matrix_t g, wgt_view_t wdeg, wgt_view_t vtx_w, part_vt bes
     prob.g = g;
     prob.wdeg = wdeg;
     prob.use_team = (g.nnz() / g.numRows() >= 8);
-    refine_data curr_state = clone_refine_data(best_state);
+    refine_data curr_state(best_state);
     part_vt part = Kokkos::subview(mem.p_mem.part, std::make_pair(static_cast<ordinal_t>(0), g.numRows()));
     Kokkos::deep_copy(exec_space(), part, best_part);
     cdata_t cdata = truncate_and_init_mem(mem, prob, best_state.label_count, best_state.g_deg == g.nnz());
@@ -1234,8 +1207,8 @@ void jet_refine(const matrix_t g, wgt_view_t wdeg, wgt_view_t vtx_w, part_vt bes
                 // count_oversized(g.numRows(), cluster_size, upper_bound);
             }
             //copy current partition and relevant data to output partition if following conditions pass
-            if(curr_state.mod > best_state.mod){
-                copy_refine_data(best_state, curr_state);
+            if(curr_state.obj > best_state.obj){
+                best_state.copy(curr_state);
                 Kokkos::deep_copy(exec_space(), best_part, part);
             }
         }
