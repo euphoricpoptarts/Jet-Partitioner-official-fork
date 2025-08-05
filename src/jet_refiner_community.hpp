@@ -145,14 +145,18 @@ void relabel_contiguously(vtx_vt labels, refine_data& rfd, mem_t& mem){
 		labels(i) = used(labels(i));
 	});
     wgt_view_t total_deg("new total degree", t_labels);
+    wgt_view_t cluster_size("new cluster size", t_labels);
     wgt_view_t old_total_deg = rfd.total_deg;
+    wgt_view_t old_cluster_size = rfd.cluster_size;
     Kokkos::parallel_for("relabel degrees", policy_t(0, initial_count), KOKKOS_LAMBDA(const ordinal_t i){
-		if(old_total_deg(i) > 0){
+		if(old_cluster_size(i) > 0){
             ordinal_t relabeled = used(i);
             total_deg(relabeled) = old_total_deg(i);
+            cluster_size(relabeled) = old_cluster_size(i);
         }
 	});
     rfd.total_deg = total_deg;
+    rfd.cluster_size = cluster_size;
     rfd.label_count = t_labels;
 }
 
@@ -1159,7 +1163,7 @@ template <bool uniform>
 void jet_refine(const matrix_t g, wgt_view_t wdeg, wgt_view_t vtx_w, vtx_vt best_part, refine_data& best_state, bool is_initial, gain_t upper_bound, mem_t& mem){
     // vertices that are oversized before clustering can not join any clusters, nor can their cluster be joined
     Kokkos::parallel_for("lock overwgt", policy_t(0, g.numRows()), KOKKOS_LAMBDA(const ordinal_t i){
-        if(vtx_w(i) > upper_bound) mem.p_mem.lock_bit(i) = 1;
+        if(vtx_w(i) >= upper_bound) mem.p_mem.lock_bit(i) = 1;
         else mem.p_mem.lock_bit(i) = 0;
     });
     problem prob;
