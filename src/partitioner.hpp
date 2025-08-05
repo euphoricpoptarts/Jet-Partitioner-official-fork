@@ -98,7 +98,7 @@ static std::list<coarse_level_t> louvain_part(matrix_t g, wgt_vt input_vtx_w, or
     Kokkos::deep_copy(top.wdeg, top.vtx_w);
     std::list<coarse_level_t> levels;
     levels.push_back(top);
-    rfd_t rfd(top.mtx, top.wdeg, 2.0, top.uniform_weights);
+    rfd_t rfd(top.mtx, top.wdeg, top.vtx_w, 2.0, top.uniform_weights);
     ref_t refiner;
     bool bump = true;
     while(true) {
@@ -128,7 +128,7 @@ static std::list<coarse_level_t> louvain_part(matrix_t g, wgt_vt input_vtx_w, or
             next_clt.uniform_weights = false;
 
             // need to update because of hec
-            rfd.update(next_clt.mtx, next_clt.wdeg);
+            rfd.update(next_clt.mtx, next_clt.wdeg, next_clt.vtx_w);
 
             levels.push_back(next_clt);
         } else if(cm.coarse_vtx > cutoff && bump) {
@@ -136,7 +136,7 @@ static std::list<coarse_level_t> louvain_part(matrix_t g, wgt_vt input_vtx_w, or
             bump = false;
 
             // need to reset to state prior to refinement
-            rfd.update(c.mtx, c.wdeg);
+            rfd.update(c.mtx, c.wdeg, c.vtx_w);
         } else {
             break;
         }

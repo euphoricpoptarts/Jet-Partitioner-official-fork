@@ -919,12 +919,13 @@ gain_t pval_sum(gain_vt pvals, ordinal_t n){
 //perform swaps, update gains, and compute change to cut and imbalance
 //4 kernels, 1 device-host syncs
 template <bool uniform>
-void perform_moves(const problem& prob, vtx_vt part, const vtx_vt swaps, cdata_t& cdata, mem_t& mem, refine_data& curr_state, wgt_view_t vtx_w, wgt_view_t cluster_size){
+void perform_moves(const problem& prob, vtx_vt part, const vtx_vt swaps, cdata_t& cdata, mem_t& mem, refine_data& curr_state, wgt_view_t vtx_w){
     const wgt_view_t& wdeg = prob.wdeg;
     vtx_vt dest_part = Kokkos::subview(mem.p_mem.dest_part, std::make_pair(static_cast<ordinal_t>(0), prob.g.numRows()));
     ordinal_t total_moves = swaps.extent(0);
     gain_vt pvals = mem.p_mem.pvals;
     wgt_view_t total_deg = curr_state.total_deg;
+    wgt_view_t cluster_size = curr_state.cluster_size;
     Kokkos::parallel_for("update total deg", policy_t(0, total_moves), KOKKOS_LAMBDA(const ordinal_t& x){
         ordinal_t i = swaps(x);
         ordinal_t best = dest_part(i);
@@ -1156,8 +1157,6 @@ cdata_t truncate_and_init_mem(mem_t& mem, problem& prob, int label_count, bool t
 
 template <bool uniform>
 void jet_refine(const matrix_t g, wgt_view_t wdeg, wgt_view_t vtx_w, vtx_vt best_part, refine_data& best_state, bool is_initial, gain_t upper_bound, mem_t& mem){
-    wgt_view_t cluster_size("cluster sizes", g.numRows());
-    Kokkos::deep_copy(exec_space(), cluster_size, vtx_w);
     // vertices that are oversized before clustering can not join any clusters, nor can their cluster be joined
     Kokkos::parallel_for("lock overwgt", policy_t(0, g.numRows()), KOKKOS_LAMBDA(const ordinal_t i){
         if(vtx_w(i) > upper_bound) mem.p_mem.lock_bit(i) = 1;
@@ -1196,10 +1195,10 @@ void jet_refine(const matrix_t g, wgt_view_t wdeg, wgt_view_t vtx_w, vtx_vt best
             }
             moves = jet_lp<uniform>(prob, c_graph, part, curr_state, mem, filter_ratio);
             if(moves.extent(0) == 0) break;
-            perform_moves<uniform>(prob, part, moves, cdata, mem, curr_state, vtx_w, cluster_size);
-            moves = fix_oversized(prob, part, mem, vtx_w, cluster_size, upper_bound);
+            perform_moves<uniform>(prob, part, moves, cdata, mem, curr_state, vtx_w);
+            moves = fix_oversized(prob, part, mem, vtx_w, curr_state.cluster_size, upper_bound);
             if(moves.extent(0) > 0){
-                perform_moves<uniform>(prob, part, moves, cdata, mem, curr_state, vtx_w, cluster_size);
+                perform_moves<uniform>(prob, part, moves, cdata, mem, curr_state, vtx_w);
                 // count_oversized(g.numRows(), cluster_size, upper_bound);
             }
             //copy current partition and relevant data to output partition if following conditions pass

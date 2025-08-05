@@ -12,6 +12,7 @@ struct cluster_data {
 
     // metadata that is preserved between levels in the clustering scheme
     wgt_vt total_deg;
+    wgt_vt cluster_size;
     scalar_t g_deg = 0;
     scalar_t v_total = 0;
     scalar_t cut = 0;
@@ -32,23 +33,27 @@ struct cluster_data {
         return result;
     }
 
-    cluster_data(const matrix_t g, const wgt_vt wdeg, double _penalty_scale, bool uniform) {
+    cluster_data(const matrix_t g, const wgt_vt wdeg, const wgt_vt vtx_w, double _penalty_scale, bool uniform) {
         // this is not the true objective for a singleton clustering
         // but we should find a better one regardless so it doesn't matter
         obj = -1.0;
         total_deg = wgt_vt("total degree of clusters", g.numRows());
+        cluster_size = wgt_vt("total size of clusters", g.numRows());
         if(uniform) g_deg = g.nnz();
         else g_deg = sum(g.values);
         v_total = g.numRows();
         cut = g_deg;
         label_count = g.numRows();
-        Kokkos::deep_copy(total_deg, wdeg);
+        Kokkos::deep_copy(exec_space(), total_deg, wdeg);
+        Kokkos::deep_copy(exec_space(), cluster_size, vtx_w);
         penalty_scale = _penalty_scale;
     }
 
-    void update(const matrix_t g, const wgt_vt wdeg) {
+    void update(const matrix_t g, const wgt_vt wdeg, const wgt_vt vtx_w) {
         total_deg = wgt_vt("total deg", g.numRows());
-        Kokkos::deep_copy(total_deg, wdeg);
+        cluster_size = wgt_vt("cluster size", g.numRows());
+        Kokkos::deep_copy(exec_space(), total_deg, wdeg);
+        Kokkos::deep_copy(exec_space(), cluster_size, vtx_w);
         cut = sum(g.values);
         label_count = g.numRows();
         obj = objective();
@@ -56,6 +61,7 @@ struct cluster_data {
 
     void copy(const cluster_data& rhs){
         Kokkos::deep_copy(exec_space(), total_deg, rhs.total_deg);
+        Kokkos::deep_copy(exec_space(), cluster_size, rhs.cluster_size);
         g_deg = rhs.g_deg;
         cut = rhs.cut;
         v_total = rhs.v_total;
@@ -64,10 +70,9 @@ struct cluster_data {
         penalty_scale = rhs.penalty_scale;
     }
 
-    cluster_data() {}
-
     cluster_data(const cluster_data& rhs){
         total_deg = wgt_vt(Kokkos::ViewAllocateWithoutInitializing("total degree of clusters"), rhs.total_deg.extent(0));
+        cluster_size = wgt_vt(Kokkos::ViewAllocateWithoutInitializing("total degree of clusters"), rhs.cluster_size.extent(0));
         copy(rhs);
     }
 
