@@ -352,6 +352,7 @@ vtx_vt jet_lp(const problem& prob, const matrix_t& c_graph, const vtx_vt& part, 
         ordinal_t hi = hash(i);
         Kokkos::parallel_reduce(Kokkos::TeamThreadRange(t, g.graph.row_map(i), g.graph.row_map(i + 1)), [&](const edge_offset_t j, float& update){
             ordinal_t v = g.graph.entries(j);
+            if(dead_bit(v)) return;
             float vgain = pregain(v);
             //adjust local gain if v has higher priority than i
             if((vgain - igain) >= eps || (abs(vgain - igain) < eps && static_cast<ordinal_t>(hash(v)) < hi)){
@@ -384,6 +385,7 @@ vtx_vt jet_lp(const problem& prob, const matrix_t& c_graph, const vtx_vt& part, 
         ordinal_t hi = hash(i);
         for(edge_offset_t j = g.graph.row_map(i); j < g.graph.row_map(i + 1); j++){
             ordinal_t v = g.graph.entries(j);
+            if(dead_bit(v)) continue;
             float vgain = pregain(v);
             //adjust local gain if v has higher priority than i
             if((vgain - igain) >= eps || (abs(vgain - igain) < eps && static_cast<ordinal_t>(hash(v)) < hi)){
