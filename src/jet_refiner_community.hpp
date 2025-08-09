@@ -506,6 +506,7 @@ vtx_vt fix_oversized(const problem& prob, vtx_vt part, mem_t& mem, wgt_view_t vt
     }, num_moves);
     vtx_vt only_moves = Kokkos::subview(moves, std::make_pair(static_cast<ordinal_t>(0), num_moves));
     vtx_vt dest_part = mem.p_mem.dest_part;
+    gain_svt cluster_count = mem.s_mem.max_vwgt;
     // compute number of new clusters needed
     // evicted vertices are sent to "overflow" clusters created for each oversized cluster
     Kokkos::parallel_scan("compute oversized idx", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
@@ -519,7 +520,7 @@ vtx_vt fix_oversized(const problem& prob, vtx_vt part, mem_t& mem, wgt_view_t vt
         } else if(final){
             oversized_idx(i) = -1;
         }
-    }, total_oversized);
+    }, cluster_count);
     vtx_vt new_clusters = mem.s_mem.vtx3;
     // identify unused cluster ids
     Kokkos::parallel_scan("compute destinations", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
@@ -534,8 +535,15 @@ vtx_vt fix_oversized(const problem& prob, vtx_vt part, mem_t& mem, wgt_view_t vt
         ordinal_t v = only_moves(x);
         ordinal_t idx = oversized_idx(part(v));
         ordinal_t offset = vscore(v) / upper_bound;
-        ordinal_t read = idx + offset;
-        dest_part(v) = new_clusters(read);
+        // determine if a vertex overflows the overflow cluster
+        if((vscore(v) + vtx_w(v) - 1) / upper_bound == offset){
+            ordinal_t read = idx + offset;
+            dest_part(v) = new_clusters(read);
+        } else {
+            //assign such vertices to a singleton cluster
+            ordinal_t read = Kokkos::atomic_fetch_add(&cluster_count(), 1);
+            dest_part(v) = new_clusters(read);
+        }
     });
     return only_moves;
 }
