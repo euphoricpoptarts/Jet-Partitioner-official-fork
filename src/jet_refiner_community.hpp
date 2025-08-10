@@ -523,6 +523,7 @@ vtx_vt fix_oversized(const problem& prob, vtx_vt part, mem_t& mem, wgt_view_t vt
     }, cluster_count);
     vtx_vt new_clusters = mem.s_mem.vtx3;
     // identify unused cluster ids
+    ordinal_t empty_clusters = 0;
     Kokkos::parallel_scan("compute destinations", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
         if(cluster_size(i) == 0){
             if(final){
@@ -530,7 +531,7 @@ vtx_vt fix_oversized(const problem& prob, vtx_vt part, mem_t& mem, wgt_view_t vt
             }
             update++;
         }
-    });
+    }, empty_clusters);
     Kokkos::parallel_for("assign new part", policy_t(0, num_moves), KOKKOS_LAMBDA(const ordinal_t x){
         ordinal_t v = only_moves(x);
         ordinal_t idx = oversized_idx(part(v));
@@ -542,7 +543,9 @@ vtx_vt fix_oversized(const problem& prob, vtx_vt part, mem_t& mem, wgt_view_t vt
         } else {
             //assign such vertices to a singleton cluster
             ordinal_t read = Kokkos::atomic_fetch_add(&cluster_count(), 1);
-            dest_part(v) = new_clusters(read);
+            // this can happen in the case of false overflow that we can't detect properly
+            if(read < empty_clusters) dest_part(v) = new_clusters(read);
+            else dest_part(v) = new_clusters(idx + offset);
         }
     });
     return only_moves;
