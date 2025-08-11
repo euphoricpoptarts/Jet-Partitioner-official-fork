@@ -89,10 +89,12 @@ public:
     static constexpr part_t NULL_PART = -1;
     static constexpr part_t HASH_RECLAIM = -2;
     static constexpr part_t NO_MOVE = -3;
+    static constexpr ordinal_t lock_duration = 2;
 
     static const ordinal_t max_sections = 128;
-    static const int max_buckets = 50;
-    static const int mid_bucket = 25;
+    static const int max_buckets = 100;
+    static const int mid_bucket = 50;
+    static constexpr float log_base = 1.5;
 
 // state data that is preserved between levels in the multilevel scheme
 struct refine_data {
@@ -150,6 +152,10 @@ vtx_vt jet_lp(const problem& prob, const part_vt& part, const conn_data& cdata, 
     vtx_vt lock_bit = mem.p_mem.lock_bit;
     part_vt dest_cache = mem.p_mem.dest_cache;
     Kokkos::parallel_for("select destination part (lp)", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i){
+        if(lock_bit(i) > 0){
+            dest_part(i) = NO_MOVE;
+            return;
+        }
         part_t best = dest_cache(i);
         if(best != NULL_PART) {
             dest_part(i) = best;
@@ -202,7 +208,7 @@ vtx_vt jet_lp(const problem& prob, const part_vt& part, const conn_data& cdata, 
             update++;
         } else if(final){
             pregain(i) = GAIN_MIN;
-            lock_bit(i) = 0;
+            if(lock_bit(i) > 0) lock_bit(i)--;
         }
     }, mem.s_mem.scan_host);
     exec_space().fence();
@@ -242,7 +248,7 @@ vtx_vt jet_lp(const problem& prob, const part_vt& part, const conn_data& cdata, 
         t.team_barrier();
         Kokkos::single(Kokkos::PerTeam(t), [&](){
             if(igain + change >= 0){
-                lock_bit(i) = 1;
+                lock_bit(i) = lock_duration;
             }
         });
     });
@@ -250,7 +256,7 @@ vtx_vt jet_lp(const problem& prob, const part_vt& part, const conn_data& cdata, 
     //scan all vertices that passed the post filter
     Kokkos::parallel_scan("filter beneficial moves", policy_t(0, num_pos), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
         ordinal_t v = pos_moves(i);
-        if(lock_bit(v)){
+        if(lock_bit(v) > 0){
             if(final){
                 swaps2(update) = v;
             }
@@ -265,7 +271,7 @@ vtx_vt jet_lp(const problem& prob, const part_vt& part, const conn_data& cdata, 
 
 KOKKOS_INLINE_FUNCTION
 static ordinal_t gain_bucket(const gain_t& gx, const scalar_t& vwgt){
-    //cast to float so we can approximate log_1.5
+    //cast to float so we can approximate log
     float gain = static_cast<float>(gx) / static_cast<float>(vwgt);
     ordinal_t gain_type = 0;
     if(gain > 0.0){
@@ -277,7 +283,7 @@ static ordinal_t gain_bucket(const gain_t& gx, const scalar_t& vwgt){
         gain = abs(gain);
         if(gain < 1.0){
             while(gain < 1.0){
-                gain *= 1.5;
+                gain *= log_base;
                 gain_type--;
             }
             if(gain_type < 2){
@@ -285,10 +291,10 @@ static ordinal_t gain_bucket(const gain_t& gx, const scalar_t& vwgt){
             }
         } else {
             while(gain > 1.0){
-                gain /= 1.5;
+                gain /= log_base;
                 gain_type++;
             }
-            if(gain_type > max_buckets){
+            if(gain_type >= max_buckets){
                 gain_type = max_buckets - 1;
             }
         }
@@ -296,7 +302,7 @@ static ordinal_t gain_bucket(const gain_t& gx, const scalar_t& vwgt){
     return gain_type;
 }
 
-template <bool adjust>
+template <bool track_evictions>
 vtx_vt get_evictions(const problem& prob, const part_vt& part, mem_t& mem, gain_vt part_sizes, const ordinal_t t_minibuckets, const ordinal_t width, const gain_t size_max){
     gain_vt bucket_sizes = Kokkos::subview(mem.s_mem.gain1, std::make_pair(static_cast<ordinal_t>(0), t_minibuckets + 1));
     gain_vt bucket_offsets = bucket_sizes;
@@ -326,8 +332,8 @@ vtx_vt get_evictions(const problem& prob, const part_vt& part, mem_t& mem, gain_
     const wgt_vt& vtx_w = prob.vtx_w;
     gain_vt save_atomic = mem.s_mem.gain2;
     vtx_vt bid = mem.s_mem.vtx2;
-    gain_vt evict_adjust = mem.s_mem.evict_end;
-    if(adjust) Kokkos::deep_copy(exec_space(), evict_adjust, 0);
+    gain_vt evicted_wgt = mem.s_mem.evict_end;
+    if(track_evictions) Kokkos::deep_copy(exec_space(), evicted_wgt, 0);
     Kokkos::parallel_scan("filter scores below cutoff", policy_t(0, prob.g.numRows()), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
         ordinal_t b = bid(i);
         if(b != -1){
@@ -337,8 +343,11 @@ vtx_vt get_evictions(const problem& prob, const part_vt& part, mem_t& mem, gain_
             gain_t limit = part_sizes(p) - size_max;
             if(score < limit){
                 if(final){
-                    if(adjust && score + vtx_w(i) >= limit){
-                        evict_adjust(p) = score + vtx_w(i);
+                    if (track_evictions){
+                        save_atomic(i) = score;
+                        if(score + vtx_w(i) >= limit){
+                            evicted_wgt(p) = score + vtx_w(i);
+                        }
                     }
                     moves(update) = i;
                 }
@@ -377,22 +386,17 @@ vtx_vt rebalance_strong(const problem& prob, const part_vt& part, const conn_dat
     gain_t max_dest = std::max(opt_size + 1, static_cast<gain_t>(prob.size_max * 0.99));
     gain_vt save_atomic = mem.s_mem.gain2;
     vtx_vt bid = mem.s_mem.vtx2;
-    gain_svt max_vwgt = mem.s_mem.max_vwgt;
+    gain_svt min_vwgt = mem.s_mem.max_vwgt;
     Kokkos::parallel_reduce("find max size", policy_t(0, k), KOKKOS_LAMBDA(const part_t p, gain_t& update){
         gain_t size = part_sizes(p);
-        if(size < max_dest){
-            gain_t cap = max_dest - size;
-            if(cap > update){
-                update = cap;
-            }
+        if(size < update){
+            update = size;
         }
-    }, Kokkos::Max<gain_t, mem_space>(max_vwgt));
+    }, Kokkos::Min<gain_t, mem_space>(min_vwgt));
     Kokkos::parallel_for("assign move scores part1", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i){
         part_t p = part(i);
         bid(i) = -1;
-        if(part_sizes(p) > size_max && vtx_w(i) <= 2*max_vwgt() && vtx_w(i) < 2*(part_sizes(p) - opt_size)){
-            uint64_t tk = 0;
-            uint64_t tg = 0;
+        if(part_sizes(p) > size_max && min_vwgt() + vtx_w(i) <= size_max){
             edge_offset_t start = cdata.conn_offsets(i);
             part_t size = cdata.conn_table_sizes(i);
             edge_offset_t end = start + size;
@@ -402,15 +406,10 @@ vtx_vt rebalance_strong(const problem& prob, const part_vt& part, const conn_dat
                 part_t pj = cdata.conn_entries(j);
                 if(pj == p){
                     p_gain = cdata.conn_vals(j);
-                } else if(pj > NULL_PART) {
-                    if(part_sizes(pj) < max_dest){
-                        tg += cdata.conn_vals(j);
-                        tk += 1;
-                    }
+                    break;
                 }
             }
-            if(tk == 0) tk = 1;
-            gain_t gain = (tg / tk) - p_gain;
+            gain_t gain = - p_gain;
             ordinal_t gain_type = gain_bucket(gain, Kokkos::min(vtx_w(i), part_sizes(p) - size_max));
             //add to count of appropriate bucket
             if(gain_type < max_buckets){
@@ -426,23 +425,26 @@ vtx_vt rebalance_strong(const problem& prob, const part_vt& part, const conn_dat
 
     // the rest of this method determines the destination part for each evicted vtx
     gain_vt evict_start = mem.s_mem.evict_start;
-    gain_vt evict_adjust = mem.s_mem.evict_end;
+    // total wgt evicted from each part
+    gain_vt evicted_wgt = mem.s_mem.evict_end;
     part_vt dest_part = mem.p_mem.dest_part;
+    gain_svt total_evicted_wgt = mem.s_mem.max_vwgt;
     //assign consecutive chunks of vertices to undersized parts using scan result
     Kokkos::parallel_for("cookie cutter", team_policy_t(1, Kokkos::AUTO), KOKKOS_LAMBDA(const member& t){
         Kokkos::parallel_scan(Kokkos::TeamThreadRange(t, 0, k), [&] (const part_t p, gain_t& update, const bool final) {
-            gain_t add = evict_adjust(p);
+            gain_t add = evicted_wgt(p);
             ordinal_t begin_bucket = max_buckets*p*sections;
             if(add == 0){
-                // evict_adjust(p) isn't set if there aren't enough evictions to balance part p
+                // evicted_wgt(p) isn't set if there aren't enough evictions to balance part p
                 add = bucket_offsets(begin_bucket + max_buckets*sections) - bucket_offsets(begin_bucket);
             }
             if(final){
-                evict_adjust(p) = bucket_offsets(begin_bucket) - update;
+                // this now becomes an exclusive prefix sum of evicted wgts up to but not including part p
+                evicted_wgt(p) = update;
             }
             update += add;
             if(final && p+1 == k){
-                max_vwgt() = update;
+                total_evicted_wgt() = update;
             }
         });
         Kokkos::parallel_scan(Kokkos::TeamThreadRange(t, 0, k), [&] (const part_t p, gain_t& update, const bool final) {
@@ -461,8 +463,8 @@ vtx_vt rebalance_strong(const problem& prob, const part_vt& part, const conn_dat
         ordinal_t v = only_moves(x);
         part_t p = part(v);
         ordinal_t b = bid(v);
-        gain_t score = save_atomic(v) + bucket_offsets(b) - evict_adjust(p);
-        save_atomic(v) = score;
+        // this now represents v's position in the eviction stream
+        save_atomic(v) += evicted_wgt(p);
     });
     Kokkos::parallel_for("select destination parts (rs)", policy_t(0, num_moves), KOKKOS_LAMBDA(const ordinal_t i){
         int p = 0;
@@ -478,7 +480,7 @@ vtx_vt rebalance_strong(const problem& prob, const part_vt& part, const conn_dat
                 dest_part(v) = p;
                 return;
             } else if(p < k){
-                save_atomic(v) = Kokkos::atomic_fetch_add(&max_vwgt(), vtx_w(v));
+                save_atomic(v) = Kokkos::atomic_fetch_add(&total_evicted_wgt(), vtx_w(v));
             }
         }
         dest_part(v) = part(v);

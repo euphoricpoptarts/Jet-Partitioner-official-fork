@@ -35,7 +35,7 @@ struct memory_store {
     using part_svt = Kokkos::View<part_t, Device>;
     using obj_vt = Kokkos::View<float*, Device>;
     static const ordinal_t max_sections = 128;
-    static const int max_buckets = 50;
+    static const int max_buckets = 100;
 
     // this struct contains memory which either requires initialization or some degree of persistence
     struct persistent {
