@@ -96,8 +96,8 @@ public:
     static constexpr ordinal_t LARGE_CUTOFF = 128;
 
     static const ordinal_t max_sections = 32;
-    static const int max_buckets = 50;
-    static const int mid_bucket = 25;
+    static const int max_buckets = 100;
+    static const int mid_bucket = 50;
 
     static KOKKOS_INLINE_FUNCTION uint32_t hash(uint32_t x) {
         x ^= x << 13;

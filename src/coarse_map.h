@@ -1,6 +1,6 @@
 #pragma once
-#include <Kokkos_Core.hpp>
 
+// a mapping from a fine grapher to a coarser graph
 template <class vtx_vt>
 struct coarse_map {
     using ordinal_t = typename vtx_vt::non_const_value_type;
