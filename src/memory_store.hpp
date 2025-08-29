@@ -47,7 +47,7 @@ struct memory_store {
         vtx_vt cluster_sizes;
         gain_vt gain_persistent;
         obj_vt obj_persistent;
-        gain_vt pvals;
+        gain_vt pvals, pvals_clone;
         part_vt part, dest_part;
         vtx_vt lock_bit;
         vtx_vt order1, order2;
@@ -71,6 +71,7 @@ struct memory_store {
             gain_persistent = gain_vt(Kokkos::ViewAllocateWithoutInitializing("gain persistent"), n);
             obj_persistent = obj_vt(Kokkos::ViewAllocateWithoutInitializing("gain persistent"), n);
             pvals = gain_vt(Kokkos::ViewAllocateWithoutInitializing("p vals"), n);
+            pvals_clone = gain_vt(Kokkos::ViewAllocateWithoutInitializing("p vals clone"), n);
             dest_part = part_vt(Kokkos::ViewAllocateWithoutInitializing("destination scratch"), n);
             part = part_vt(Kokkos::ViewAllocateWithoutInitializing("part scratch"), n);
             lock_bit = vtx_vt(Kokkos::ViewAllocateWithoutInitializing("lock bit"), n);

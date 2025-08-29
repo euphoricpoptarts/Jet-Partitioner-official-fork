@@ -1172,6 +1172,12 @@ cdata_t truncate_and_init_mem(mem_t& mem, problem& prob, int label_count, bool t
     return cdata;
 }
 
+void clone_pval(mem_t& mem, ordinal_t n){
+    gain_vt pval_subview = Kokkos::subview(mem.p_mem.pvals, std::make_pair(static_cast<ordinal_t>(0), n));
+    gain_vt pval_clone_subview = Kokkos::subview(mem.p_mem.pvals_clone, std::make_pair(static_cast<ordinal_t>(0), n));
+    Kokkos::deep_copy(exec_space(), pval_clone_subview, pval_subview);
+}
+
 template <bool uniform>
 void jet_refine(const matrix_t g, wgt_view_t wdeg, wgt_view_t vtx_w, vtx_vt best_part, refine_data& best_state, bool is_initial, gain_t upper_bound, mem_t& mem){
     // vertices that are oversized before clustering can not join any clusters, nor can their cluster be joined
@@ -1222,6 +1228,7 @@ void jet_refine(const matrix_t g, wgt_view_t wdeg, wgt_view_t vtx_w, vtx_vt best
             if(curr_state.obj > best_state.obj){
                 best_state.copy(curr_state);
                 Kokkos::deep_copy(exec_space(), best_part, part);
+                clone_pval(mem, g.numRows());
             }
         }
     }

@@ -44,6 +44,7 @@
 #include "KokkosGraph_MIS2.hpp"
 #include "experiment_data.hpp"
 #include "coarse_map.h"
+#include "cluster_data.h"
 
 namespace jet_partitioner {
 
@@ -79,6 +80,7 @@ public:
     using argmax_reducer_t = Kokkos::MaxFirstLoc<uint32_t, edge_offset_t, Device>;
     using argmax_t = typename argmax_reducer_t::value_type;
     using coarse_map_t = coarse_map<vtx_vt>;
+    using rfd_t = cluster_data<matrix_t>;
     static constexpr ordinal_t ORD_MAX = std::numeric_limits<ordinal_t>::max();
     static constexpr bool is_host_space = std::is_same<typename exec_space::memory_space, typename Kokkos::DefaultHostExecutionSpace::memory_space>::value;    
 
@@ -233,40 +235,66 @@ public:
 
     template <bool is_uniform>
     static coarse_map_t coarsen_HEC(const matrix_t& g,
-        vtx_vt part) {
+        const vtx_vt part,
+        const wgt_vt wdeg,
+        const wgt_vt pvals,
+        const rfd_t& curr_state) {
 
         ordinal_t n = g.numRows();
         vtx_vt hn("heavies", n);
         vtx_vt vcmap("vcmap", n);
+        vtx_vt well_connected("well connected bit", n);
         Kokkos::deep_copy(vcmap, ORD_MAX);
+        float penalty_mod = curr_state.get_penalty_modifier();
+        wgt_vt total_deg = curr_state.total_deg;
+
+        Kokkos::parallel_for("check if well connected", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i){
+            scalar_t pval = pvals(i);
+            const scalar_t wd = wdeg(i);
+            const ordinal_t p = part(i);
+            float penalty = wd*(total_deg(p) - wd)*penalty_mod;
+            float benefit = pval - penalty;
+            if(benefit > 0){
+                well_connected(i) = 1;
+            }
+        });
 
         if constexpr(is_uniform){
-            Kokkos::parallel_for("Potential matches (random)", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t i) {
+            Kokkos::parallel_for("select first viable neighbor", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t i) {
                 edge_offset_t start = g.graph.row_map(i);
                 edge_offset_t end = g.graph.row_map(i+1);
                 hn(i) = i;
+                if(well_connected(i) == 0) return;
                 ordinal_t adj_size = end - start;
                 if(adj_size == 0) return;
+                ordinal_t mdeg = n + 1;
+                ordinal_t vx = ORD_MAX;
                 for(edge_offset_t j = start; j < end; j++){
                     ordinal_t v = g.graph.entries(j);
-                    if(part(i) == part(v)){
-                        hn(i) = v;
-                        return;
+                    if(part(i) == part(v) && well_connected(v) == 1){
+                        ordinal_t vdeg = g.graph.row_map(v+1) - g.graph.row_map(v);
+                        if(vdeg < mdeg){
+                            mdeg = vdeg;
+                            vx = v;
+                        }
                     }
+                }
+                if(vx != ORD_MAX){
+                    hn(i) = vx;
                 }
             });
         } else {
-            Kokkos::parallel_for("Heaviest HN", team_policy_t(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
+            Kokkos::parallel_for("Heaviest viable edge", team_policy_t(n, Kokkos::AUTO), KOKKOS_LAMBDA(const member & thread) {
                 ordinal_t i = thread.league_rank();
                 ordinal_t adj_size = g.graph.row_map(i + 1) - g.graph.row_map(i);
-                if(adj_size > 0){
+                if(well_connected(i) == 1 && adj_size > 0){
                     edge_offset_t end = g.graph.row_map(i + 1);
                     edge_offset_t start = g.graph.row_map(i);
                     typename Kokkos::MaxLoc<scalar_t,edge_offset_t,Device>::value_type argmax{0, end};
                     Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, start, end), [=](const edge_offset_t idx, Kokkos::ValLocScalar<scalar_t,edge_offset_t>& local) {
                         scalar_t wgt = g.values(idx);
                         ordinal_t v = g.graph.entries(idx);
-                        if(wgt >= local.val && part(i) == part(v)){
+                        if(wgt >= local.val && part(i) == part(v) && well_connected(v) == 1){
                             local.val = wgt;
                             local.loc = idx;
                         }
