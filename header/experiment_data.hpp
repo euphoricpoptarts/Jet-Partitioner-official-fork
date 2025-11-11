@@ -131,6 +131,7 @@ private:
     scalar_t largest_part = 0;
     scalar_t smallest_part = 0;
     int64_t obj = 0;
+    double coarse_edge_ratio = 0;
 
 public:
 	experiment_data() :
@@ -174,6 +175,10 @@ public:
 		return measurements[static_cast<int>(m)];
 	}
 
+    void setCoarseEdgeRatio(double _ratio){
+        coarse_edge_ratio = _ratio;
+    }
+
 	void log(char* filename, bool first, bool last) {
 		std::ofstream f;
 		f.open(filename, std::ios::app);
@@ -187,6 +192,7 @@ public:
             f << "\"max-part-cut\":" << max_part_cut << ",";
             f << "\"objective\":" << obj << ",";
 			f << "\"imbalance-ratio\":" << imb_ratio << ',';
+			f << "\"coarse-edge-ratio\":" << coarse_edge_ratio << ',';
 			for (int i = 0; i < static_cast<int>(Measurement::END); i++) {
 				f << "\"" << measurementNames[i] << "-duration-seconds\":" << measurements[i] << ",";
 			}

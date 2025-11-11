@@ -99,7 +99,8 @@ public:
             }
             
             // pointer-chasing
-            while(now > then){
+            hasher_t hash;
+            while(hash(now) > hash(then)){
                 now = then;
                 then = hn(then);
             }
@@ -120,7 +121,8 @@ public:
             ordinal_t then = hn(i);
 
             // pointer-chasing in the opposite direction
-            while(vcmap(now) == ORD_MAX && now < then){
+            hasher_t hash;
+            while(vcmap(now) == ORD_MAX && hash(now) < hash(then)){
                 now = then;
                 then = hn(then);
             }

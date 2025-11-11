@@ -196,7 +196,7 @@ static ordinal_t gain_bucket(const gain_t& gx, const scalar_t& vwgt){
 //determines which vertices (if any) should be moved to another part to improve objective
 //8 kernels, 2 device-host syncs
 template <bool uniform>
-vtx_vt jet_lp(const problem& prob, const matrix_t& c_graph, const vtx_vt& part, const refine_data& rfd, mem_t& mem, float filter_ratio){
+vtx_vt jet_lp(const problem& prob, const matrix_t& c_graph, const vtx_vt& part, const refine_data& rfd, mem_t& mem, float filter_ratio, const vtx_vt vtx_constraint, const vtx_vt c_constraint){
     const matrix_t& g = prob.g;
     ordinal_t n = g.numRows();
     ordinal_t num_pos = 0;
@@ -236,6 +236,7 @@ vtx_vt jet_lp(const problem& prob, const matrix_t& c_graph, const vtx_vt& part, 
             if(j_val > 0 && j_val >= b_conn){
                 ordinal_t px = c_graph.graph.entries(j);
                 if(dead_bit(px)) continue;
+                if(vtx_constraint(i) != c_constraint(px)) continue;
                 float j_conn = j_val - static_cast<float>(total_deg(px))*multi;
                 if(j_conn >= b_conn){
                     b_conn = j_conn;
@@ -274,6 +275,7 @@ vtx_vt jet_lp(const problem& prob, const matrix_t& c_graph, const vtx_vt& part, 
                 if(j_val > 0 && j_val >= maxl){
                     ordinal_t px = c_graph.graph.entries(j);
                     if(dead_bit(px)) continue;
+                    if(vtx_constraint(i) != c_constraint(px)) continue;
                     float j_conn = j_val - static_cast<float>(total_deg(px))*multi;
                     if(j_conn >= maxl){
                         // this is not deterministic unless the case j_conn == maxl is handled properly
@@ -433,7 +435,7 @@ void count_oversized(ordinal_t n, wgt_view_t cluster_size, gain_t upper_bound){
     std::cout << "Oversized part count: " << total_oversized << std::endl;
 }
 
-vtx_vt fix_oversized(const problem& prob, vtx_vt part, mem_t& mem, wgt_view_t vtx_w, wgt_view_t cluster_size, gain_t upper_bound) {
+vtx_vt fix_oversized(const problem& prob, vtx_vt part, mem_t& mem, wgt_view_t vtx_w, wgt_view_t cluster_size, gain_t upper_bound, vtx_vt constraint) {
     const matrix_t& g = prob.g;
     ordinal_t n = g.numRows();
     vtx_vt oversized_idx = mem.s_mem.vtx1;
@@ -547,6 +549,8 @@ vtx_vt fix_oversized(const problem& prob, vtx_vt part, mem_t& mem, wgt_view_t vt
             if(read < empty_clusters) dest_part(v) = new_clusters(read);
             else dest_part(v) = new_clusters(idx + offset);
         }
+        ordinal_t dest = dest_part(v);
+        constraint(dest) = constraint(part(v));
     });
     return only_moves;
 }
@@ -1179,7 +1183,7 @@ void clone_pval(mem_t& mem, ordinal_t n){
 }
 
 template <bool uniform>
-void jet_refine(const matrix_t g, wgt_view_t wdeg, wgt_view_t vtx_w, vtx_vt best_part, refine_data& best_state, bool is_initial, gain_t upper_bound, mem_t& mem){
+void jet_refine(const matrix_t g, wgt_view_t wdeg, wgt_view_t vtx_w, vtx_vt best_part, refine_data& best_state, bool is_initial, gain_t upper_bound, mem_t& mem, const vtx_vt constraint){
     // vertices that are oversized before clustering can not join any clusters, nor can their cluster be joined
     Kokkos::parallel_for("lock overwgt", policy_t(0, g.numRows()), KOKKOS_LAMBDA(const ordinal_t i){
         if(vtx_w(i) >= upper_bound) mem.p_mem.lock_bit(i) = 1;
@@ -1192,6 +1196,8 @@ void jet_refine(const matrix_t g, wgt_view_t wdeg, wgt_view_t vtx_w, vtx_vt best
     refine_data curr_state(best_state);
     vtx_vt part = Kokkos::subview(mem.p_mem.part, std::make_pair(static_cast<ordinal_t>(0), g.numRows()));
     Kokkos::deep_copy(exec_space(), part, best_part);
+    vtx_vt c_constraint("cluster constraint", g.numRows());
+    Kokkos::deep_copy(exec_space(), c_constraint, constraint);
     cdata_t cdata = truncate_and_init_mem(mem, prob, best_state.label_count, best_state.g_deg == g.nnz());
     if(!is_initial){
         init_conn_graph<uniform>(prob, part, cdata, mem);
@@ -1216,10 +1222,10 @@ void jet_refine(const matrix_t g, wgt_view_t wdeg, wgt_view_t vtx_w, vtx_vt best
                 // use the input graph in place of the conn graph
                 c_graph = g;
             }
-            moves = jet_lp<uniform>(prob, c_graph, part, curr_state, mem, filter_ratio);
+            moves = jet_lp<uniform>(prob, c_graph, part, curr_state, mem, filter_ratio, constraint, c_constraint);
             if(moves.extent(0) == 0) break;
             perform_moves<uniform>(prob, part, moves, cdata, mem, curr_state, vtx_w);
-            moves = fix_oversized(prob, part, mem, vtx_w, curr_state.cluster_size, upper_bound);
+            moves = fix_oversized(prob, part, mem, vtx_w, curr_state.cluster_size, upper_bound, c_constraint);
             if(moves.extent(0) > 0){
                 perform_moves<uniform>(prob, part, moves, cdata, mem, curr_state, vtx_w);
                 // count_oversized(g.numRows(), cluster_size, upper_bound);
