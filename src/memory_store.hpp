@@ -86,7 +86,8 @@ struct memory_store {
             evict_end = gain_vt("evict end", k);
             evict_fix = gain_vt("evict fix", k);
             undersized = part_vt("undersized parts", k);
-            vtx1 = vtx_vt(Kokkos::ViewAllocateWithoutInitializing("vtx scratch 1"), n);
+            // +2 for one specific use-case of this memory
+            vtx1 = vtx_vt(Kokkos::ViewAllocateWithoutInitializing("vtx scratch 1"), n + 2);
             vtx2 = vtx_vt(Kokkos::ViewAllocateWithoutInitializing("vtx scratch 2"), std::max(n, min_size));
             zeros1 = vtx_vt("zeros 1", n);
             scan_host = vtx_pin_st("scan host");

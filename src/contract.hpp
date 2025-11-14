@@ -445,7 +445,8 @@ coarse_map generate_coarse_mapping(const matrix_t g,
     const wgt_vt& vtx_w,
     bool uniform_weights,
     pool_t& rand_pool,
-    experiment_data<scalar_t>& experiment) {
+    experiment_data<scalar_t>& experiment,
+    mem_t& mem) {
 
     Kokkos::Timer timer;
     coarse_map interpolation_graph;
@@ -479,7 +480,7 @@ coarse_map generate_coarse_mapping(const matrix_t g,
             break;
         case Match:
         case MtMetis:
-            interpolation_graph = mapper.coarsen_match(g, uniform_weights, rand_pool, choice);
+            interpolation_graph = mapper.coarsen_match(g, uniform_weights, rand_pool, choice, mem);
             break;
     }
     Kokkos::fence();
@@ -501,7 +502,7 @@ std::list<coarse_level_triple> generate_coarse_graphs(const matrix_t fine_g, con
 
         coarse_level_triple current_level = *levels.rbegin();
 
-        coarse_map interp_graph = generate_coarse_mapping(current_level.mtx, current_level.vtx_w, current_level.uniform_weights, rand_pool, experiment);
+        coarse_map interp_graph = generate_coarse_mapping(current_level.mtx, current_level.vtx_w, current_level.uniform_weights, rand_pool, experiment, mem);
 
         if (interp_graph.coarse_vtx < min_allowed_vtx) {
             break;

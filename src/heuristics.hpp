@@ -43,6 +43,7 @@
 #include "KokkosSparse_CrsMatrix.hpp"
 #include "KokkosGraph_MIS2.hpp"
 #include "experiment_data.hpp"
+#include "memory_store.hpp"
 
 namespace jet_partitioner {
 
@@ -73,6 +74,7 @@ public:
     using pool_t = Kokkos::Random_XorShift64_Pool<Device>;
     using gen_t = typename pool_t::generator_type;
     using hasher_t = Kokkos::pod_hash<ordinal_t>;
+    using mem_t = memory_store<matrix_t, int>;
     // there is a problem edge-case in kokkos with MaxLoc that can be triggered rarely for any input graph
     // the problem will be fixed soon, use MaxFirstLoc in meantime
     using argmax_reducer_t = Kokkos::MaxFirstLoc<uint32_t, edge_offset_t, Device>;
@@ -318,9 +320,10 @@ public:
         });
     }
 
-    void matchPairs(const vtx_vt unmappedVtx, vtx_vt matchmakers, const ordinal_t n, vtx_vt vcmap){
+    void matchPairs(const vtx_vt unmappedVtx, vtx_vt matchmakers, const ordinal_t n, vtx_vt vcmap, mem_t& mem){
         ordinal_t mappable = unmappedVtx.extent(0);
-        vtx_vt counts("matchmaker counts", n + 1);
+        vtx_vt counts = Kokkos::subview(mem.s_mem.vtx1, std::make_pair((ordinal_t)0, n + 2));
+        Kokkos::deep_copy(exec_space(), counts, 0);
         Kokkos::parallel_for("count", policy_t(0, mappable), KOKKOS_LAMBDA(const ordinal_t x){
             ordinal_t i = unmappedVtx(x);
             ordinal_t m = matchmakers(x);
@@ -329,7 +332,7 @@ public:
         // aliasing
         vtx_vt offsets = counts;
         ordinal_t width = 0;
-        Kokkos::parallel_scan("compute offsets", policy_t(0, n + 1), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
+        Kokkos::parallel_scan("compute offsets", policy_t(0, n + 2), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
             // do this first cuz of aliasing
             ordinal_t add = counts(i);
             if(final){
@@ -339,7 +342,7 @@ public:
             if((add & 1) == 1) add++;
             update += add;
         }, width);
-        vtx_vt vtx("vtx", width);
+        vtx_vt vtx = Kokkos::subview(mem.s_mem.vtx2, std::make_pair((ordinal_t)0, n));
         Kokkos::deep_copy(exec_space(), vtx, -1);
         Kokkos::parallel_for("insert", policy_t(0, mappable), KOKKOS_LAMBDA(const ordinal_t x){
             ordinal_t i = unmappedVtx(x);
@@ -469,15 +472,16 @@ public:
 
     coarse_map coarsen_match(const matrix_t& g,
         const bool uniform_weights, pool_t& rand_pool,
-        const int match_choice) {
+        const int match_choice,
+        mem_t& mem) {
 
         ordinal_t n = g.numRows();
 
-        vtx_vt hn(Kokkos::ViewAllocateWithoutInitializing("heavies"), n);
+        vtx_vt hn = Kokkos::subview(mem.s_mem.zeros1, std::make_pair((ordinal_t)0, n));
         vtx_vt vcmap(Kokkos::ViewAllocateWithoutInitializing("vcmap"), n);
         Kokkos::deep_copy(hn, ORD_MAX);
         Kokkos::deep_copy(vcmap, ORD_MAX);
-        vtx_vt vperm_scratch(Kokkos::ViewAllocateWithoutInitializing("vperm"), n);
+        vtx_vt vperm_scratch = Kokkos::subview(mem.s_mem.vtx1, std::make_pair((ordinal_t)0, n));
         vtx_vt vperm = vperm_scratch;
 
         if (uniform_weights) {
@@ -501,7 +505,7 @@ public:
         }
         ordinal_t perm_length = n;
         //construct mapping using heaviest edges
-        vtx_vt perm_scratch(Kokkos::ViewAllocateWithoutInitializing("next perm"), n);
+        vtx_vt perm_scratch = Kokkos::subview(mem.s_mem.vtx2, std::make_pair((ordinal_t)0, n));
         while (perm_length > 0) {
             //std::cout << "Remaining vtx: " << perm_length << std::endl;
             //match vertices with vertex given by hn
@@ -574,6 +578,8 @@ public:
             }, perm_length);
             vperm = Kokkos::subview(vperm_scratch, std::make_pair((ordinal_t)0, perm_length));
         }
+        // must reset to 0
+        Kokkos::deep_copy(exec_space(), hn, 0);
 
         if (match_choice == 1) {
             ordinal_t unmapped = countUnmatched(vcmap);
@@ -599,7 +605,7 @@ public:
                     matchmakers(i) = v;
                 });
                 ordinal_t nullkey = ORD_MAX;
-                matchPairs(unmappedVtx, matchmakers, n, vcmap);
+                matchPairs(unmappedVtx, matchmakers, n, vcmap, mem);
             }
 
             unmapped = countUnmatched(vcmap);
@@ -657,7 +663,9 @@ public:
                 vtx_vt matchmakers(Kokkos::ViewAllocateWithoutInitializing("matchmakers"), mappable);
                 Kokkos::parallel_for("create digests", policy_t(0, mappable), KOKKOS_LAMBDA(ordinal_t i) {
                     ordinal_t u = unmappedVtx(i);
-                    ordinal_t h = ORD_MAX;
+                    // zero-degree vertices choose a non-existent vertex "n" as their matchmaker
+                    // this is a hacky solution to avoid coarsening stalling when the graph has disconnected components
+                    ordinal_t h = n;
                     scalar_t max_wgt = 0;
                     ordinal_t min_deg = ORD_MAX;
 
@@ -679,7 +687,7 @@ public:
                     matchmakers(i) = h;
                 });
                 ordinal_t nullkey = ORD_MAX;
-                matchPairs(unmappedVtx, matchmakers, n, vcmap);
+                matchPairs(unmappedVtx, matchmakers, n, vcmap, mem);
             }
         }
 
