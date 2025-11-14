@@ -318,6 +318,49 @@ public:
         });
     }
 
+    void matchPairs(const vtx_vt unmappedVtx, vtx_vt matchmakers, const ordinal_t n, vtx_vt vcmap){
+        ordinal_t mappable = unmappedVtx.extent(0);
+        vtx_vt counts("matchmaker counts", n + 1);
+        Kokkos::parallel_for("count", policy_t(0, mappable), KOKKOS_LAMBDA(const ordinal_t x){
+            ordinal_t i = unmappedVtx(x);
+            ordinal_t m = matchmakers(x);
+            vcmap(i) = Kokkos::atomic_fetch_add(&counts(m), 1);
+        });
+        // aliasing
+        vtx_vt offsets = counts;
+        ordinal_t width = 0;
+        Kokkos::parallel_scan("compute offsets", policy_t(0, n + 1), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
+            // do this first cuz of aliasing
+            ordinal_t add = counts(i);
+            if(final){
+                offsets(i) = update;
+            }
+            // create padding so each row begins at an even idx
+            if((add & 1) == 1) add++;
+            update += add;
+        }, width);
+        vtx_vt vtx("vtx", width);
+        Kokkos::deep_copy(exec_space(), vtx, -1);
+        Kokkos::parallel_for("insert", policy_t(0, mappable), KOKKOS_LAMBDA(const ordinal_t x){
+            ordinal_t i = unmappedVtx(x);
+            ordinal_t m = matchmakers(x);
+            ordinal_t offset = offsets(m) + vcmap(i);
+            vtx(offset) = i;
+        });
+        Kokkos::parallel_for("match pairs", policy_t(0, width / 2), KOKKOS_LAMBDA(ordinal_t j){
+            j *= 2;
+            ordinal_t x = vtx(j);
+            ordinal_t twin = vtx(j+1);
+            if(twin != -1) {
+                ordinal_t cv = twin < x ? twin : x;
+                vcmap(twin) = cv;
+                vcmap(x) = cv;
+            } else {
+                vcmap(x) = ORD_MAX;
+            }
+        });
+    }
+
     template<bool is_initial, bool is_uniform>
     struct pickMatch {
         matrix_t g;
@@ -549,14 +592,14 @@ public:
                     }
                 }, mappable);
                 unmappedVtx = Kokkos::subview(unmappedVtx, std::make_pair((ordinal_t)0, mappable));
-                vtx_vt hashes(Kokkos::ViewAllocateWithoutInitializing("hashes"), mappable);
+                vtx_vt matchmakers(Kokkos::ViewAllocateWithoutInitializing("matchmakers"), mappable);
                 Kokkos::parallel_for("create digests", policy_t(0, mappable), KOKKOS_LAMBDA(ordinal_t i) {
                     ordinal_t u = unmappedVtx(i);
                     ordinal_t v = g.graph.entries(g.graph.row_map(u));
-                    hashes(i) = v;
+                    matchmakers(i) = v;
                 });
                 ordinal_t nullkey = ORD_MAX;
-                matchHash<ordinal_t>(unmappedVtx, hashes, nullkey, vcmap);
+                matchPairs(unmappedVtx, matchmakers, n, vcmap);
             }
 
             unmapped = countUnmatched(vcmap);
@@ -611,7 +654,7 @@ public:
                         update++;
                     }
                 }, mappable);
-                vtx_vt hashes(Kokkos::ViewAllocateWithoutInitializing("hashes"), mappable);
+                vtx_vt matchmakers(Kokkos::ViewAllocateWithoutInitializing("matchmakers"), mappable);
                 Kokkos::parallel_for("create digests", policy_t(0, mappable), KOKKOS_LAMBDA(ordinal_t i) {
                     ordinal_t u = unmappedVtx(i);
                     ordinal_t h = ORD_MAX;
@@ -633,10 +676,10 @@ public:
                             }
                         }
                     }
-                    hashes(i) = h;
+                    matchmakers(i) = h;
                 });
                 ordinal_t nullkey = ORD_MAX;
-                matchHash<ordinal_t>(unmappedVtx, hashes, nullkey, vcmap);
+                matchPairs(unmappedVtx, matchmakers, n, vcmap);
             }
         }
 
