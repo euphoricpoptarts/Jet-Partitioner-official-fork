@@ -322,7 +322,7 @@ public:
 
     void matchPairs(const vtx_vt unmappedVtx, vtx_vt matchmakers, const ordinal_t n, vtx_vt vcmap, mem_t& mem){
         ordinal_t mappable = unmappedVtx.extent(0);
-        vtx_vt counts = Kokkos::subview(mem.s_mem.vtx1, std::make_pair((ordinal_t)0, n + 2));
+        vtx_vt counts = Kokkos::subview(mem.s_mem.vtx1, std::make_pair((ordinal_t)0, n + 1));
         Kokkos::deep_copy(exec_space(), counts, 0);
         Kokkos::parallel_for("count", policy_t(0, mappable), KOKKOS_LAMBDA(const ordinal_t x){
             ordinal_t i = unmappedVtx(x);
@@ -332,7 +332,7 @@ public:
         // aliasing
         vtx_vt offsets = counts;
         ordinal_t width = 0;
-        Kokkos::parallel_scan("compute offsets", policy_t(0, n + 2), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
+        Kokkos::parallel_scan("compute offsets", policy_t(0, n + 1), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
             // do this first cuz of aliasing
             ordinal_t add = counts(i);
             if(final){
@@ -578,8 +578,6 @@ public:
             }, perm_length);
             vperm = Kokkos::subview(vperm_scratch, std::make_pair((ordinal_t)0, perm_length));
         }
-        // must reset to 0
-        Kokkos::deep_copy(exec_space(), hn, 0);
 
         if (match_choice == 1) {
             ordinal_t unmapped = countUnmatched(vcmap);
@@ -587,7 +585,7 @@ public:
 
             //leaf matches
             if (unmappedRatio > 0.25) {
-                vtx_vt unmappedVtx(Kokkos::ViewAllocateWithoutInitializing("unmapped vertices"), unmapped);
+                vtx_vt unmappedVtx = Kokkos::subview(mem.s_mem.vtx3, std::make_pair((ordinal_t)0, unmapped));
                 ordinal_t mappable;
                 Kokkos::parallel_scan("scan unmapped", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
                     if(vcmap(i) == ORD_MAX && g.graph.row_map(i+1) - g.graph.row_map(i) == 1){
@@ -598,7 +596,7 @@ public:
                     }
                 }, mappable);
                 unmappedVtx = Kokkos::subview(unmappedVtx, std::make_pair((ordinal_t)0, mappable));
-                vtx_vt matchmakers(Kokkos::ViewAllocateWithoutInitializing("matchmakers"), mappable);
+                vtx_vt matchmakers = Kokkos::subview(mem.s_mem.zeros1, std::make_pair((ordinal_t)0, mappable));
                 Kokkos::parallel_for("create digests", policy_t(0, mappable), KOKKOS_LAMBDA(ordinal_t i) {
                     ordinal_t u = unmappedVtx(i);
                     ordinal_t v = g.graph.entries(g.graph.row_map(u));
@@ -650,7 +648,7 @@ public:
 
             //relative matches
             if (unmappedRatio > 0.25) {
-                vtx_vt unmappedVtx(Kokkos::ViewAllocateWithoutInitializing("unmapped vertices"), unmapped);
+                vtx_vt unmappedVtx = Kokkos::subview(mem.s_mem.vtx3, std::make_pair((ordinal_t)0, unmapped));
                 ordinal_t mappable;
                 Kokkos::parallel_scan("scan unmapped", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
                     if(vcmap(i) == ORD_MAX){
@@ -660,7 +658,7 @@ public:
                         update++;
                     }
                 }, mappable);
-                vtx_vt matchmakers(Kokkos::ViewAllocateWithoutInitializing("matchmakers"), mappable);
+                vtx_vt matchmakers = Kokkos::subview(mem.s_mem.zeros1, std::make_pair((ordinal_t)0, mappable));
                 Kokkos::parallel_for("create digests", policy_t(0, mappable), KOKKOS_LAMBDA(ordinal_t i) {
                     ordinal_t u = unmappedVtx(i);
                     // zero-degree vertices choose a non-existent vertex "n" as their matchmaker
@@ -690,6 +688,8 @@ public:
                 matchPairs(unmappedVtx, matchmakers, n, vcmap, mem);
             }
         }
+        // must reset to 0
+        Kokkos::deep_copy(exec_space(), hn, 0);
 
         //create singleton aggregates of remaining unmatched vertices
         Kokkos::parallel_for(policy_t(0, n), KOKKOS_LAMBDA(ordinal_t i){

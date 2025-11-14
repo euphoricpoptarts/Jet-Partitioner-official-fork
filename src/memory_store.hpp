@@ -70,7 +70,7 @@ struct memory_store {
     // this struct contains memory which can be used as-is
     struct scratch {
         gain_vt gain1, gain2, evict_start, evict_end, evict_fix, evict_diff;
-        vtx_vt vtx1, vtx2, zeros1;
+        vtx_vt vtx1, vtx2, vtx3, zeros1;
         part_vt undersized;
         vtx_pin_st scan_host;
         gain_pin_st cut_change1, cut_change2, max_part;
@@ -86,9 +86,10 @@ struct memory_store {
             evict_end = gain_vt("evict end", k);
             evict_fix = gain_vt("evict fix", k);
             undersized = part_vt("undersized parts", k);
-            // +2 for one specific use-case of this memory
-            vtx1 = vtx_vt(Kokkos::ViewAllocateWithoutInitializing("vtx scratch 1"), n + 2);
+            // +1 for one specific use-case of this memory
+            vtx1 = vtx_vt(Kokkos::ViewAllocateWithoutInitializing("vtx scratch 1"), n + 1);
             vtx2 = vtx_vt(Kokkos::ViewAllocateWithoutInitializing("vtx scratch 2"), std::max(n, min_size));
+            vtx3 = vtx_vt(Kokkos::ViewAllocateWithoutInitializing("vtx scratch 3"), n);
             zeros1 = vtx_vt("zeros 1", n);
             scan_host = vtx_pin_st("scan host");
             total_undersized = part_svt("total undersized");
