@@ -54,24 +54,24 @@ part_vt partition(value_t& edge_cut,
     return partitioner<matrix_t, part_t>::partition(edge_cut, config, g, vweights, uniform_ew, experiment);
 }
 
-part_mt partition_host(value_t& edge_cut,
-                const config_t& config,
-                const host_matrix_t g,
-                const wgt_host_vt vweights,
-                bool uniform_ew,
-                experiment_data<value_t>& experiment){
+// part_mt partition_host(value_t& edge_cut,
+//                 const config_t& config,
+//                 const host_matrix_t g,
+//                 const wgt_host_vt vweights,
+//                 bool uniform_ew,
+//                 experiment_data<value_t>& experiment){
 
-    return partitioner<host_matrix_t, part_t>::partition(edge_cut, config, g, vweights, uniform_ew, experiment);
-}
+//     return partitioner<host_matrix_t, part_t>::partition(edge_cut, config, g, vweights, uniform_ew, experiment);
+// }
 
-part_mt partition_serial(value_t& edge_cut,
-                const config_t& config,
-                const serial_matrix_t g,
-                const wgt_serial_vt vweights,
-                bool uniform_ew,
-                experiment_data<value_t>& experiment){
+// part_mt partition_serial(value_t& edge_cut,
+//                 const config_t& config,
+//                 const serial_matrix_t g,
+//                 const wgt_serial_vt vweights,
+//                 bool uniform_ew,
+//                 experiment_data<value_t>& experiment){
     
-    return partitioner<serial_matrix_t, part_t>::partition(edge_cut, config, g, vweights, uniform_ew, experiment);
-}
+//     return partitioner<serial_matrix_t, part_t>::partition(edge_cut, config, g, vweights, uniform_ew, experiment);
+// }
 
 }

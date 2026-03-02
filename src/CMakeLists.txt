@@ -10,7 +10,8 @@ target_sources(jet PUBLIC
   BASE_DIRS ${CMAKE_SOURCE_DIR}/header
   FILES ${CMAKE_SOURCE_DIR}/header/jet.h ${CMAKE_SOURCE_DIR}/header/jet_defs.h ${CMAKE_SOURCE_DIR}/header/jet_config.h ${CMAKE_SOURCE_DIR}/header/experiment_data.hpp)
 target_include_directories(jet PRIVATE ${CMAKE_SOURCE_DIR}/header)
-
+target_include_directories(jet PRIVATE ${CMAKE_SOURCE_DIR}/cluster/header)
+target_include_directories(jet PRIVATE ${CMAKE_SOURCE_DIR}/non_app_header)
 if(DEFINED METIS_HINT)
 # This is used by the build script
 # to avoid putting metis and gklib in the global path
@@ -27,14 +28,14 @@ endif()
 
 # link libjet (for downstream library consumers)
 # no linking actually occurs for libjet itself
-target_link_libraries(jet PUBLIC Kokkos::kokkos Kokkos::kokkoskernels)
+target_link_libraries(jet PUBLIC Kokkos::kokkos Kokkos::kokkoskernels cluster)
 target_link_libraries(jet PRIVATE ${LIBMETIS})
 if(LINK_GKLIB)
 target_link_libraries(jet PRIVATE ${LIBGKLIB})
 endif()
 
 # install jetlib and create cmake package
-install(TARGETS jet
+install(TARGETS jet cluster
 EXPORT jetTargets
 FILE_SET HEADERS DESTINATION include
 ARCHIVE DESTINATION lib)

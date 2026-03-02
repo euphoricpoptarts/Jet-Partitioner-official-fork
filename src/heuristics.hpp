@@ -44,7 +44,7 @@
 #include "KokkosGraph_MIS2.hpp"
 #include "experiment_data.hpp"
 #include "coarse_map.h"
-#include "cluster_data.h"
+#include "cluster_data.hpp"
 
 namespace jet_partitioner {
 
@@ -80,7 +80,7 @@ public:
     using argmax_reducer_t = Kokkos::MaxFirstLoc<uint32_t, edge_offset_t, Device>;
     using argmax_t = typename argmax_reducer_t::value_type;
     using coarse_map_t = coarse_map<vtx_vt>;
-    using rfd_t = cluster_data<matrix_t>;
+    using rfd_t = cluster_data;
     static constexpr ordinal_t ORD_MAX = std::numeric_limits<ordinal_t>::max();
     static constexpr bool is_host_space = std::is_same<typename exec_space::memory_space, typename Kokkos::DefaultHostExecutionSpace::memory_space>::value;    
 

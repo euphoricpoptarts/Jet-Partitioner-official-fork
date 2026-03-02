@@ -10,7 +10,7 @@ add_executable(jet_serial driver.cpp)
 add_executable(pstat part_eval.cpp)
 
 foreach(prog jet_import pstat)
-    target_include_directories(${prog} PRIVATE ${CMAKE_SOURCE_DIR}/header ${CMAKE_SOURCE_DIR}/src)
+    target_include_directories(${prog} PRIVATE ${CMAKE_SOURCE_DIR}/header ${CMAKE_SOURCE_DIR}/src ${CMAKE_SOURCE_DIR}/non_app_header)
 endforeach(prog)
 
 # compile definitions to set exe behavior

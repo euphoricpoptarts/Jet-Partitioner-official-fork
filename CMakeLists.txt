@@ -10,5 +10,6 @@ endif()
 # find KokkosKernels also handles kokkos
 find_package(KokkosKernels REQUIRED)
 add_compile_options(-Wall -Wextra -Wshadow)
+add_subdirectory(cluster)
 add_subdirectory(src)
 add_subdirectory(app)
