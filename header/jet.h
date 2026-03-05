@@ -48,21 +48,22 @@ part_vt partition(value_t& edge_cut,
                 const matrix_t g,
                 const wgt_vt vweights,
                 bool uniform_ew,
-                experiment_data<value_t>& experiment);
+                experiment_data<value_t>& experiment,
+                float lambda);
 
-part_mt partition_host(value_t& edge_cut,
-                const config_t& config,
-                const host_matrix_t g,
-                const wgt_host_vt vweights,
-                bool uniform_ew,
-                experiment_data<value_t>& experiment);
+// part_mt partition_host(value_t& edge_cut,
+//                 const config_t& config,
+//                 const host_matrix_t g,
+//                 const wgt_host_vt vweights,
+//                 bool uniform_ew,
+//                 experiment_data<value_t>& experiment);
 
-part_mt partition_serial(value_t& edge_cut,
-                const config_t& config,
-                const serial_matrix_t g,
-                const wgt_serial_vt vweights,
-                bool uniform_ew,
-                experiment_data<value_t>& experiment);
+// part_mt partition_serial(value_t& edge_cut,
+//                 const config_t& config,
+//                 const serial_matrix_t g,
+//                 const wgt_serial_vt vweights,
+//                 bool uniform_ew,
+//                 experiment_data<value_t>& experiment);
 
 // part_vt partition_big(big_val_t& edge_cut,
 //                 const config_t& config,

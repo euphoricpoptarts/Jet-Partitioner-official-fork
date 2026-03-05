@@ -65,21 +65,22 @@ value_t median(std::vector<value_t>& cuts){
 
 int main(int argc, char **argv) {
 
-    if (argc < 3) {
+    if (argc < 4) {
         std::cerr << "Insufficient number of args provided" << std::endl;
-        std::cerr << "Usage: " << argv[0] << " <metis_graph_file> <config_file> <optional partition_output_filename> <optional metrics_filename>" << std::endl;
+        std::cerr << "Usage: " << argv[0] << " <metis_graph_file> <config_file> <lambda> <optional partition_output_filename> <optional metrics_filename>" << std::endl;
         return -1;
     }
     config_t config;
     char *filename = argv[1];
     if(!load_config(config, argv[2])) return -1;
+    float lambda = atof(argv[3]);
     char *part_file = nullptr;
     char *metrics = nullptr;
-    if(argc >= 4){
-        part_file = argv[3];
-    }
     if(argc >= 5){
-        metrics = argv[4];
+        part_file = argv[4];
+    }
+    if(argc >= 6){
+        metrics = argv[5];
     }
 #ifdef FOUR9
     config.refine_tolerance = 0.9999;
@@ -113,13 +114,13 @@ int main(int argc, char **argv) {
             experiment_data<value_t> experiment;
 #ifdef HOST
             part_vt part = partition_host(edgecut, config, g, vweights, uniform_ew,
-                experiment);
+                experiment, lambda);
 #elif defined SERIAL
             part_vt part = partition_serial(edgecut, config, g, vweights, uniform_ew,
-                experiment);
+                experiment, lambda);
 #else
             part_vt part = partition(edgecut, config, g, vweights, uniform_ew,
-                experiment);
+                experiment, lambda);
 #endif
             avg += edgecut;
             cuts.push_back(edgecut);

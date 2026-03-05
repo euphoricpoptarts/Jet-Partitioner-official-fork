@@ -49,9 +49,10 @@ part_vt partition(value_t& edge_cut,
                 const matrix_t g,
                 const wgt_vt vweights,
                 bool uniform_ew,
-                experiment_data<value_t>& experiment){
+                experiment_data<value_t>& experiment,
+                float lambda){
     
-    return partitioner<matrix_t, part_t>::partition(edge_cut, config, g, vweights, uniform_ew, experiment);
+    return partitioner<matrix_t, part_t>::partition(edge_cut, config, g, vweights, uniform_ew, experiment, lambda);
 }
 
 // part_mt partition_host(value_t& edge_cut,
