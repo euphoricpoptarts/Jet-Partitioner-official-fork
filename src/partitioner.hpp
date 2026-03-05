@@ -168,7 +168,8 @@ static part_vt partition(scalar_t& edge_cut,
                                   const matrix_t g,
                                   const wgt_vt vweights,
                                   bool uniform_ew,
-                                  experiment_data<scalar_t>& experiment) {
+                                  experiment_data<scalar_t>& experiment,
+                                  float lambda) {
 
     coarsener_t coarsener;
     switch(config.coarsening_alg){
@@ -202,16 +203,15 @@ static part_vt partition(scalar_t& edge_cut,
     double fin_uncoarsening = 0;
     part_vt part;
     {
-        normalized_lcc rfd(g, vweights, 0.1, true);
+        normalized_lcc rfd(g, vweights, lambda, true);
         mem_t mem(g, k, rfd);
         wg_t top;
         top.mtx = g;
         top.vtx_w = vweights;
         top.edge_uniform = true;
         vtx_vt dummy_constraint;//("constraint", g.numRows());
-        std::list<coarse_level_t> cg_list = jet_community::clustering_methods::louvain_part<false>(mem, top, rfd, dummy_constraint, cluster_limit);
-        // std::list<coarse_level_t> cg_list = louvain_part(g, vweights, cluster_limit, cluster_limit*2, cutoff / 2, mem, uniform_ew, constraint);
-        // std::list<coarse_level_t> cg_list_part2 = coarsener.generate_coarse_graphs(cg_list.back().mtx, cg_list.back().vtx_w, mem, experiment, cluster_limit, false);
+        std::list<coarse_level_t> cg_list = jet_community::clustering_methods::leiden_part<false, false>(mem, top, rfd, dummy_constraint, cluster_limit);
+        // std::list<coarse_level_t> cg_list_part2 = coarsener.generate_coarse_graphs(cg_list.back().mtx, cg_list.back().vtx_w, mem, experiment, cluster_limit*2, false);
         // cg_list_part2.pop_front();
         // cg_list.splice(cg_list.end(), cg_list_part2);
         Kokkos::fence();

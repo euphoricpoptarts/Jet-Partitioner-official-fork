@@ -44,26 +44,28 @@ namespace clustering_methods {
     }
 
     template <bool plus, bool improve>
-    std::list<coarse_level_t> leiden_part(mem_t& mem, wg_t top, rfd_t& rfd, vtx_vt input, const ordinal_t upper_bound){
+    std::list<coarse_level_t> leiden_part(mem_t& mem, wg_t top, rfd_t& rfd, vtx_vt input, const ordinal_t upper_bound_in){
         std::vector<wg_t> levels;
         std::list<coarse_level_t> output;
         output.push_back(wg_to_level(top));
         levels.push_back(top);
+        ordinal_t upper_bound = upper_bound_in;
         vtx_vt part("cluster assignments", top.mtx.numRows());
         if(!improve){
             Kokkos::parallel_for("set initial assignments", policy_t(0, top.mtx.numRows()), KOKKOS_LAMBDA(const ordinal_t x){
                 part(x) = x;
             });
         } else Kokkos::deep_copy(part, input);
+        bool setzero = true;
         while(true) {
             wg_t c = levels[levels.size() - 1];
             double old_obj = rfd.obj;
             // orderings must be generated for use in local_move and build_coarse_graph
             order::generate_orderings(mem, c.mtx);
             lm_t::local_move<false>(c, part, rfd, !improve && (levels.size() == 1), mem, part, true, upper_bound);
-            if(rfd.label_count == c.mtx.numRows()){
-                break;
-            }
+            // if(rfd.label_count == c.mtx.numRows()){
+            //     break;
+            // }
             vtx_vt louv = part;
             int coarse_vtx_count = 0;
             vtx_vt coarse_map;
@@ -86,6 +88,11 @@ namespace clustering_methods {
                 cm.map = coarse_map;
                 nx_out.interp_mtx = cm;
                 output.push_back(nx_out);
+            } else if (setzero) {
+                rfd.lambda = 0;
+                rfd.update_objective();
+                upper_bound = upper_bound_in * 2;
+                setzero = false;
             } else {
                 break;
             }
@@ -142,7 +149,102 @@ namespace clustering_methods {
                 break;
             }
         }
+
+        int counter = 1;
+        for(auto& l : output){
+            l.level = counter++;
+        }
         
+        return output;
+    }
+
+    template <bool constrained>
+    std::list<coarse_level_t> louvain_plus_part(mem_t& mem, wg_t top, rfd_t& rfd, vtx_vt constraint, const ordinal_t upper_bound){
+        if(constrained) rfd.reset(top.mtx, top.vtx_w);
+        std::vector<wg_t> levels;
+        std::vector<vtx_vt> parts;
+        levels.push_back(top);
+        bool drop_constraint = constrained;
+        while(true) {
+            wg_t c = levels[levels.size() - 1];
+            vtx_vt part("cluster assignments", c.mtx.numRows());
+            Kokkos::parallel_for("set initial assignments", policy_t(0, c.mtx.numRows()), KOKKOS_LAMBDA(const ordinal_t x){
+                part(x) = x;
+            });
+            // orderings must be generated for use in local_move and build_coarse_graph
+            order::generate_orderings(mem, c.mtx);
+            lm_t::local_move<constrained>(c, part, rfd, true, mem, constraint, true, upper_bound);
+            // the user clearly cares about quality if they are doing multiple iterations
+            // if(constrained && rfd.label_count == c.mtx.numRows()){
+            //     lm_t::local_move_strict<constrained>(c, part, rfd, true, mem, constraint);
+            // }
+            // this logic (when part is appended to vector) should be reworked
+            parts.push_back(part);
+            if(rfd.label_count < c.mtx.numRows()){
+                wg_t next_level;
+                if(c.edge_uniform) next_level = contract_t::build_coarse_graph<true, true>(c, part, rfd.label_count, mem);
+                else next_level = contract_t::build_coarse_graph<false, false>(c, part, rfd.label_count, mem);
+                wgt_vt td_rfd = Kokkos::subview(rfd.total_deg, std::make_pair((ordinal_t)0, rfd.label_count));
+                next_level.vtx_w = wgt_vt("next level vtx weights", rfd.label_count);
+                Kokkos::deep_copy(next_level.vtx_w, td_rfd);
+                levels.push_back(next_level);
+
+                if(constrained) {
+                    vtx_vt next_constraint("next constraint", rfd.label_count);
+                    downsample(constraint, next_constraint, part);
+                    constraint = next_constraint;
+                }
+            } else if(drop_constraint) {
+                Kokkos::deep_copy(constraint, 0);
+                // this logic should be reworked
+                parts.pop_back();
+                drop_constraint = false;
+            } else {
+                break;
+            }
+        }
+
+        if(levels.size() > 1){
+            // last level has the same partition as previous level
+            // so refining this level on the uncoarsening pass
+            // would not integrate any coarse information
+            levels.pop_back();
+            parts.pop_back();
+        }
+        
+        // levels.size()-2 so that (i+1) is in bounds
+        for(int i = levels.size() - 2; i >= 0; i--){
+            wg_t c = levels[i];
+            vtx_vt coarse_part = parts[i + 1];
+            vtx_vt part = parts[i];
+            Kokkos::parallel_for("update top level assignments", policy_t(0, c.mtx.numRows()), KOKKOS_LAMBDA(const ordinal_t x){
+                part(x) = coarse_part(part(x));
+            });
+            order::generate_orderings(mem, c.mtx);
+            lm_t::local_move<constrained>(c, part, rfd, false, mem, constraint, true, upper_bound);
+        }
+
+        std::list<coarse_level_t> output;
+        output.push_back(wg_to_level(top));
+        {
+            wg_t coarsest;
+            order::generate_orderings(mem, top.mtx);
+            if(top.edge_uniform) coarsest = contract_t::build_coarse_graph<true, true>(top, parts[0], rfd.label_count, mem);
+            else coarsest = contract_t::build_coarse_graph<false, false>(top, parts[0], rfd.label_count, mem);
+            wgt_vt td_rfd = Kokkos::subview(rfd.total_deg, std::make_pair((ordinal_t)0, rfd.label_count));
+            coarsest.vtx_w = wgt_vt("next level vtx weights", rfd.label_count);
+            Kokkos::deep_copy(coarsest.vtx_w, td_rfd);
+            coarse_level_t nx_out = wg_to_level(coarsest);
+            typename coarse_level_t::coarse_map_t cm;
+            cm.coarse_vtx = rfd.label_count;
+            cm.map = parts[0];
+            nx_out.interp_mtx = cm;
+            output.push_back(nx_out);
+        }
+        int counter = 1;
+        for(auto& l : output){
+            l.level = counter++;
+        }
         return output;
     }
 
@@ -154,6 +256,8 @@ namespace clustering_methods {
 
     template std::list<coarse_level_t> louvain_part<true>(mem_t& mem, wg_t top, rfd_t& rfd, vtx_vt constraint, const ordinal_t upper_bound);
     template std::list<coarse_level_t> louvain_part<false>(mem_t& mem, wg_t top, rfd_t& rfd, vtx_vt constraint, const ordinal_t upper_bound);
+    template std::list<coarse_level_t> louvain_plus_part<true>(mem_t& mem, wg_t top, rfd_t& rfd, vtx_vt constraint, const ordinal_t upper_bound);
+    template std::list<coarse_level_t> louvain_plus_part<false>(mem_t& mem, wg_t top, rfd_t& rfd, vtx_vt constraint, const ordinal_t upper_bound);
 }
 
 }

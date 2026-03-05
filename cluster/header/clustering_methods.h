@@ -25,5 +25,8 @@ namespace clustering_methods {
     template <bool constrained>
     std::list<coarse_level_t> louvain_part(mem_t& mem, wg_t top, rfd_t& rfd, vtx_vt constraint, const ordinal_t upper_bound);
 
+    template <bool constrained>
+    std::list<coarse_level_t> louvain_plus_part(mem_t& mem, wg_t top, rfd_t& rfd, vtx_vt constraint, const ordinal_t upper_bound);
+
 }
 }

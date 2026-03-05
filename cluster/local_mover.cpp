@@ -124,7 +124,7 @@ void relabel_contiguously(vtx_vt labels, refine_data& rfd, mem_t& mem){
 		}
 	}, t_labels);
     swap_total_deg = Kokkos::subview(mem.p_mem.pvals, std::make_pair((ordinal_t)0, t_labels));
-    Kokkos::deep_copy(exec_space(), total_deg, 0);
+    // Kokkos::deep_copy(exec_space(), total_deg, 0);
     total_deg = Kokkos::subview(rfd.total_deg, std::make_pair((ordinal_t)0, t_labels));
     Kokkos::deep_copy(exec_space(), total_deg, swap_total_deg);
 	Kokkos::parallel_for("relabel", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i){
@@ -683,6 +683,7 @@ static ordinal_t gain_bucket(const scalar_t& gx, const scalar_t& vwgt){
     return gain_type;
 }
 
+template <bool constrained>
 vtx_vt fix_oversized(const wg_t& wg, const vtx_vt part, mem_t& mem, refine_data& curr_state, scalar_t upper_bound, vtx_vt constraint) {
     const matrix_t& g = wg.mtx;
     const wgt_vt vtx_w = wg.vtx_w;
@@ -692,8 +693,9 @@ vtx_vt fix_oversized(const wg_t& wg, const vtx_vt part, mem_t& mem, refine_data&
     vtx_vt moves = mem.s_mem.vtx2;
     vtx_vt bid = mem.s_mem.vtx3;
     vtx_vt dead_bit = mem.p_mem.lock_bit;
+    ordinal_t labels = curr_state.label_count;
     ordinal_t total_oversized = 0;
-    Kokkos::parallel_scan("compute oversized idx", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
+    Kokkos::parallel_scan("compute oversized idx", policy_t(0, labels), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
         if(cluster_size(i) > upper_bound && dead_bit(i) == 0){
             if(final){
                 oversized_idx(i) = update;
@@ -781,7 +783,7 @@ vtx_vt fix_oversized(const wg_t& wg, const vtx_vt part, mem_t& mem, refine_data&
     wgt_svt cluster_count = mem.s_mem.max_vwgt;
     // compute number of new clusters needed
     // evicted vertices are sent to "overflow" clusters created for each oversized cluster
-    Kokkos::parallel_scan("compute oversized idx", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
+    Kokkos::parallel_scan("compute oversized idx", policy_t(0, labels), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
         if(cluster_size(i) > upper_bound && dead_bit(i) == 0){
             if(final){
                 oversized_idx(i) = update;
@@ -796,7 +798,7 @@ vtx_vt fix_oversized(const wg_t& wg, const vtx_vt part, mem_t& mem, refine_data&
     vtx_vt new_clusters = mem.s_mem.vtx3;
     // identify unused cluster ids
     ordinal_t empty_clusters = 0;
-    Kokkos::parallel_scan("compute destinations", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
+    Kokkos::parallel_scan("compute destinations", policy_t(0, labels), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
         if(cluster_size(i) == 0){
             if(final){
                 new_clusters(update) = i;
@@ -819,9 +821,20 @@ vtx_vt fix_oversized(const wg_t& wg, const vtx_vt part, mem_t& mem, refine_data&
             if(read < empty_clusters) dest_part(v) = new_clusters(read);
             else dest_part(v) = new_clusters(idx + offset);
         }
-        // ordinal_t dest = dest_part(v);
-        // constraint(dest) = constraint(part(v));
+        ordinal_t dest = dest_part(v);
+        if(constrained) constraint(dest) = constraint(part(v));
     });
+    ordinal_t needed = 0;
+    Kokkos::deep_copy(needed, cluster_count);
+    if(needed > empty_clusters) {
+        ordinal_t extra = needed - empty_clusters;
+        curr_state.label_count += extra;
+        Kokkos::parallel_for("print", policy_t(labels, curr_state.label_count), KOKKOS_LAMBDA(const ordinal_t i){
+            cluster_size(i) = 0;
+        });
+        labels = curr_state.label_count;
+        if(labels > n) printf("labels: %i, n: %i\n", labels, n);
+    }
     return only_moves;
 }
 
@@ -1609,8 +1622,8 @@ void local_move(const wg_t wg, vtx_vt best_part, refine_data& best_state, bool i
                 // use the input graph in place of the conn graph
                 c_graph = g;
             }
-            if(wg.edge_uniform && !cdata.init) moves = candidates_and_destinations<true, constrained>(wg, c_graph, part, curr_state, mem, filter_ratio, constraint);
-            else moves = candidates_and_destinations<false, constrained>(wg, c_graph, part, curr_state, mem, filter_ratio, constraint);
+            if(wg.edge_uniform && !cdata.init) moves = candidates_and_destinations<true, constrained>(wg, c_graph, part, curr_state, mem, filter_ratio, c_constraint);
+            else moves = candidates_and_destinations<false, constrained>(wg, c_graph, part, curr_state, mem, filter_ratio, c_constraint);
             // anytime there are zero candidate moves, the local move procedure can not progress
             if(moves.extent(0) == 0) break;
             if(wg.edge_uniform) moves = afterburner_filter<true>(moves, wg, part, curr_state, mem);
@@ -1618,10 +1631,10 @@ void local_move(const wg_t wg, vtx_vt best_part, refine_data& best_state, bool i
             // if all candidates have negative gain, it is possible that none are selected by the afterburner
             // in this case, progress may be possible with a different filter ratio, but significant progress from this state is unlikely
             if(moves.extent(0) == 0) break;
-            if(iter_count > 1 || !is_initial) set_new_cluster_ids<constrained>(moves, part, curr_state, mem, constraint);
+            if(iter_count > 1 || !is_initial) set_new_cluster_ids<constrained>(moves, part, curr_state, mem, c_constraint);
             if(wg.edge_uniform) perform_moves<true>(wg, part, moves, cdata, mem, curr_state);
             else perform_moves<false>(wg, part, moves, cdata, mem, curr_state);
-            moves = fix_oversized(wg, part, mem, curr_state, upper_bound, c_constraint);
+            moves = fix_oversized<constrained>(wg, part, mem, curr_state, upper_bound, c_constraint);
             if(moves.extent(0) > 0){
                 if(wg.edge_uniform) perform_moves<true>(wg, part, moves, cdata, mem, curr_state);
                 else perform_moves<false>(wg, part, moves, cdata, mem, curr_state);
