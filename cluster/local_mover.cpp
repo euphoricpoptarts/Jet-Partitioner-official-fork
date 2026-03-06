@@ -811,15 +811,17 @@ vtx_vt fix_oversized(const wg_t& wg, const vtx_vt part, mem_t& mem, refine_data&
         ordinal_t idx = oversized_idx(part(v));
         ordinal_t offset = vscore(v) / upper_bound;
         // determine if a vertex overflows the overflow cluster
+        ordinal_t read;
         if((vscore(v) + vtx_w(v) - 1) / upper_bound == offset){
-            ordinal_t read = idx + offset;
-            dest_part(v) = new_clusters(read);
+            read = idx + offset;
         } else {
             //assign such vertices to a singleton cluster
-            ordinal_t read = Kokkos::atomic_fetch_add(&cluster_count(), 1);
-            // this can happen in the case of false overflow that we can't detect properly
-            if(read < empty_clusters) dest_part(v) = new_clusters(read);
-            else dest_part(v) = new_clusters(idx + offset);
+            read = Kokkos::atomic_fetch_add(&cluster_count(), 1);
+        }
+        if(read < empty_clusters) {
+            dest_part(v) = new_clusters(read);
+        } else {
+            dest_part(v) = (read - empty_clusters) + labels;
         }
         ordinal_t dest = dest_part(v);
         if(constrained) constraint(dest) = constraint(part(v));
@@ -833,7 +835,7 @@ vtx_vt fix_oversized(const wg_t& wg, const vtx_vt part, mem_t& mem, refine_data&
             cluster_size(i) = 0;
         });
         labels = curr_state.label_count;
-        if(labels > n) printf("labels: %i, n: %i\n", labels, n);
+        // if(labels > n) printf("labels: %i, n: %i\n", labels, n);
     }
     return only_moves;
 }
