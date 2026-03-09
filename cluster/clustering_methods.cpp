@@ -5,6 +5,7 @@
 #include "header/leidenR.h"
 #include "header/ordering.h"
 #include "header/clustering_methods.h"
+#include "match.hpp"
 
 namespace jet_community {
 
@@ -57,9 +58,10 @@ namespace clustering_methods {
             });
         } else Kokkos::deep_copy(part, input);
         bool setzero = true;
+        typename matching<matrix_t>::pool_t rand_pool(std::time(nullptr));
         while(true) {
             wg_t c = levels[levels.size() - 1];
-            double old_obj = rfd.obj;
+            // double old_obj = rfd.obj;
             // orderings must be generated for use in local_move and build_coarse_graph
             order::generate_orderings(mem, c.mtx);
             lm_t::local_move<false>(c, part, rfd, !improve && (levels.size() == 1), mem, part, true, upper_bound);
@@ -67,25 +69,25 @@ namespace clustering_methods {
             //     break;
             // }
             vtx_vt louv = part;
-            int coarse_vtx_count = 0;
-            vtx_vt coarse_map;
-            if(levels.size() == 1 && c.edge_uniform) coarse_map = lr_t::template coarsen_leidenR<true, true>(c, louv, mem, rfd, coarse_vtx_count);
-            else if(levels.size() == 1 && !(c.edge_uniform)) coarse_map = lr_t::template coarsen_leidenR<true, false>(c, louv, mem, rfd, coarse_vtx_count);
-            else coarse_map = lr_t::template coarsen_leidenR<false, false>(c, louv, mem, rfd, coarse_vtx_count);
+            typename coarse_level_t::coarse_map_t cm = matching<matrix_t>::coarsen_match(c.mtx, c.edge_uniform, rand_pool, c.vtx_w, upper_bound, louv);
+            int coarse_vtx_count = cm.coarse_vtx;
+            // if(levels.size() == 1 && c.edge_uniform) coarse_map = lr_t::template coarsen_leidenR<true, true>(c, louv, mem, rfd, coarse_vtx_count);
+            // else if(levels.size() == 1 && !(c.edge_uniform)) coarse_map = lr_t::template coarsen_leidenR<true, false>(c, louv, mem, rfd, coarse_vtx_count);
+            // else coarse_map = lr_t::template coarsen_leidenR<false, false>(c, louv, mem, rfd, coarse_vtx_count);
             if(coarse_vtx_count < c.mtx.numRows() * 0.9){
                 wg_t next_level;
-                if(c.edge_uniform) next_level = contract_t::build_coarse_graph<true, false>(c, coarse_map, coarse_vtx_count, mem);
-                else next_level = contract_t::build_coarse_graph<false, false>(c, coarse_map, coarse_vtx_count, mem);
+                if(c.edge_uniform) next_level = contract_t::build_coarse_graph<true, false>(c, cm.map, coarse_vtx_count, mem);
+                else next_level = contract_t::build_coarse_graph<false, false>(c, cm.map, coarse_vtx_count, mem);
                 next_level.vtx_w = wgt_vt("weighted degree 2", coarse_vtx_count);
-                coarsen_vtx_w(c.vtx_w, next_level.vtx_w, coarse_map);
+                coarsen_vtx_w(c.vtx_w, next_level.vtx_w, cm.map);
 
                 part = vtx_vt("cluster assignments coarse", coarse_vtx_count);
-                downsample(louv, part, coarse_map);
+                downsample(louv, part, cm.map);
                 levels.push_back(next_level);
                 coarse_level_t nx_out = wg_to_level(next_level);
-                typename coarse_level_t::coarse_map_t cm;
-                cm.coarse_vtx = coarse_vtx_count;
-                cm.map = coarse_map;
+                // typename coarse_level_t::coarse_map_t cm;
+                // cm.coarse_vtx = coarse_vtx_count;
+                // cm.map = coarse_map;
                 nx_out.interp_mtx = cm;
                 output.push_back(nx_out);
             } else if (setzero) {
