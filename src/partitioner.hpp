@@ -228,19 +228,23 @@ static part_vt partition(scalar_t& edge_cut,
         fin_uncoarsening = t.seconds();
     }
     Kokkos::fence();
-    // for(int i = 0; i < 0; i++) {
-    //     normalized_lcc rfd(g, vweights, 2.0, true);
-    //     mem_t mem(g, k, rfd);
-    //     vtx_vt constraint("constraint", g.numRows());
-    //     Kokkos::deep_copy(constraint, part);
-    //     std::list<coarse_level_t> cg_list = louvain_part(g, vweights, cluster_limit, cluster_limit*2, cutoff / 2, mem, uniform_ew, constraint);
-    //     Kokkos::fence();
-    //     double imb_ratio = config.max_imb_ratio;
-    //     part = uncoarsener_t::uncoarsen(cg_list, constraint, config,
-    //         edge_cut, mem, experiment);
-    //     Kokkos::fence();
-    //     fin_uncoarsening = t.seconds();
-    // }
+    for(int i = 0; i < 10; i++) {
+        normalized_lcc rfd(g, vweights, lambda, true);
+        mem_t mem(g, k, rfd);
+        wg_t top;
+        top.mtx = g;
+        top.vtx_w = vweights;
+        top.edge_uniform = true;
+        vtx_vt constraint("constraint", g.numRows());
+        Kokkos::deep_copy(constraint, part);
+        std::list<coarse_level_t> cg_list = jet_community::clustering_methods::leiden_part<false, true>(mem, top, rfd, constraint, cluster_limit);
+        Kokkos::fence();
+        double imb_ratio = config.max_imb_ratio;
+        part = uncoarsener_t::uncoarsen(cg_list, constraint, config,
+            edge_cut, mem, experiment);
+        Kokkos::fence();
+        fin_uncoarsening = t.seconds();
+    }
     double fin_time = t.seconds();
     experiment.addMeasurement(Measurement::Total, fin_time - start_time);
     experiment.addMeasurement(Measurement::FreeGraph, fin_time - fin_uncoarsening);

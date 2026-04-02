@@ -20,10 +20,10 @@ namespace clustering_methods {
     using coarse_level_t = coarse_level<matrix_t>;
 
     template <bool plus, bool improve>
-    std::list<coarse_level_t> leiden_part(mem_t& mem, wg_t top, rfd_t& rfd, vtx_vt input, const ordinal_t upper_bound);
+    std::list<coarse_level_t> leiden_part(mem_t& mem, wg_t top, rfd_t& rfd, vtx_vt& input, const ordinal_t upper_bound);
 
     template <bool constrained>
-    std::list<coarse_level_t> louvain_part(mem_t& mem, wg_t top, rfd_t& rfd, vtx_vt constraint, const ordinal_t upper_bound);
+    std::list<coarse_level_t> louvain_part(mem_t& mem, wg_t top, rfd_t& rfd, vtx_vt& constraint, const ordinal_t upper_bound);
 
     template <bool constrained>
     std::list<coarse_level_t> louvain_plus_part(mem_t& mem, wg_t top, rfd_t& rfd, vtx_vt constraint, const ordinal_t upper_bound);

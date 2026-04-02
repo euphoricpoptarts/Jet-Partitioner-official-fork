@@ -1590,7 +1590,11 @@ void local_move(const wg_t wg, vtx_vt best_part, refine_data& best_state, bool i
     vtx_vt c_constraint;
     if(constrained){
         c_constraint = vtx_vt("cluster constraint", g.numRows());
-        Kokkos::deep_copy(exec_space(), c_constraint, constraint);
+        // Kokkos::deep_copy(exec_space(), c_constraint, constraint);
+        Kokkos::parallel_for("set constraint", policy_t(0, g.numRows()), KOKKOS_LAMBDA(const ordinal_t i){
+            ordinal_t p = best_part(i);
+            c_constraint(p) = constraint(i);
+        });
     }
     // this is a reference to avoid allocating new memory
     refine_data& curr_state = mem.spare_cluster_data;
