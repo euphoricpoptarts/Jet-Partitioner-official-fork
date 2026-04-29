@@ -89,7 +89,7 @@ public:
     static constexpr part_t NULL_PART = -1;
     static constexpr part_t HASH_RECLAIM = -2;
     static constexpr part_t NO_MOVE = -3;
-    static constexpr ordinal_t lock_duration = 2;
+    static constexpr ordinal_t lock_duration = 1;
 
     static const ordinal_t max_sections = 128;
     static const int max_buckets = 100;
@@ -1007,7 +1007,6 @@ void jet_refine(const matrix_t g, const config_t& config, wgt_vt vtx_w, part_vt 
         best_state.cut = stat::get_total_cut(g, best_part);
         best_state.part_sizes = stat::get_part_sizes(g, vtx_w, best_part, k);
         best_state.total_size = stat::get_total_size(g, vtx_w);
-        std::cout << best_state.total_size << std::endl;
     }
     problem prob;
     prob.g = g;
