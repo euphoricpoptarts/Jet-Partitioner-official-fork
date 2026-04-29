@@ -346,6 +346,7 @@ public:
         Kokkos::parallel_for("match by hash", policy_t(0, mappable), KOKKOS_LAMBDA(const ordinal_t x){
             ordinal_t i = unmappedVtx(x);
             hash_t h = hashes(x);
+            if(h == nullkey) return;
             ordinal_t key = h % mappable;
             bool found = false;
             //find the slot already owned by key
@@ -383,7 +384,7 @@ public:
         });
     }
 
-    template<bool is_initial, bool is_uniform>
+    template<bool is_initial, bool is_uniform, bool constrained>
     struct pickMatch {
         matrix_t g;
         vtx_vt vcmap;
@@ -394,6 +395,7 @@ public:
         ordinal_t perm_length;
         wgt_vt vtx_w;
         ordinal_t upper;
+        vtx_vt constraint;
 
         pickMatch(matrix_t _g,
             vtx_vt _vcmap,
@@ -403,7 +405,8 @@ public:
             ordinal_t _n,
             ordinal_t _perm_length,
             wgt_vt _vtx_w,
-            ordinal_t _upper) :
+            ordinal_t _upper,
+            vtx_vt _constraint) :
                 g(_g),
                 vcmap(_vcmap),
                 hn(_hn),
@@ -412,7 +415,8 @@ public:
                 n(_n),
                 perm_length(_perm_length),
                 vtx_w(_vtx_w),
-                upper(_upper) {}
+                upper(_upper),
+                constraint(_constraint) {}
 
         KOKKOS_INLINE_FUNCTION
         void operator()(const member& thread) const {
@@ -433,6 +437,7 @@ public:
                 Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, start, end), [=](const edge_offset_t j, scalar_t& update){
                     ordinal_t v = g.graph.entries(j);
                     if(!is_initial && vcmap(v) != ORD_MAX) return;
+                    if(constrained && constraint(v) != constraint(u)) return;
                     if(g.values(j) > update && vtx_w(u) + vtx_w(v) <= upper){
                         update = g.values(j);
                     }
@@ -445,6 +450,7 @@ public:
                 //v must be unmatched to be considered
                 uint32_t v = g.graph.entries(j);
                 if(!is_initial && vcmap(v) != ORD_MAX) return;
+                if(constrained && constraint(v) != constraint(u)) return;
                 if(is_uniform || (g.values(j) == max_ewt  && vtx_w(u) + vtx_w(v) <= upper)){
                     uint32_t tiebreaker = xorshiftHash<uint32_t>(v + r);
                     // >= since 0 must be a valid max val
@@ -476,6 +482,7 @@ public:
             // select a random adjacent vertex having the max edge weight
             for (edge_offset_t j = g.graph.row_map(u); j < g.graph.row_map(u + 1); j++) {
                 ordinal_t v = g.graph.entries(j);
+                if(constrained && constraint(v) != constraint(u)) continue;
                 //v must be unmatched to be considered
                 if (is_initial || vcmap(v) == ORD_MAX) {
                     if (!is_uniform && (max_ewt < g.values(j) && vtx_w(u) + vtx_w(v) <= upper)) {
@@ -496,11 +503,13 @@ public:
         }
     };
 
+    template <bool constrained>
     coarse_map_t coarsen_match(const matrix_t& g,
         const bool uniform_weights, pool_t& rand_pool,
         const int match_choice,
         wgt_vt vtx_w,
-        const ordinal_t upper) {
+        const ordinal_t upper,
+        const vtx_vt constraint) {
 
         ordinal_t n = g.numRows();
 
@@ -511,7 +520,7 @@ public:
         vtx_vt vperm_scratch(Kokkos::ViewAllocateWithoutInitializing("vperm"), n);
         vtx_vt vperm = vperm_scratch;
 
-        if (uniform_weights) {
+        if (uniform_weights && !constrained) {
             //all weights equal at this level so choose heaviest edge randomly
             Kokkos::parallel_for("Potential matches (random)", policy_t(0, n), KOKKOS_LAMBDA(ordinal_t i) {
                 ordinal_t adj_size = g.graph.row_map(i + 1) - g.graph.row_map(i);
@@ -523,7 +532,7 @@ public:
             });
         }
         else {
-            pickMatch<true, false> matcher(g, vcmap, hn, rand_pool, vperm, n, n, vtx_w, upper);
+            pickMatch<true, false, constrained> matcher(g, vcmap, hn, rand_pool, vperm, n, n, vtx_w, upper, constraint);
             if(!is_host_space && g.nnz() / g.numRows() > 32){
                 Kokkos::parallel_for("Potential matches (heavy)", team_policy_t(n, Kokkos::AUTO), matcher);
             } else {
@@ -575,14 +584,14 @@ public:
 
             // find new matches for unmatched vertices
             if(uniform_weights){
-                pickMatch<false, true> matcher(g, vcmap, hn, rand_pool, vperm, n, perm_length, vtx_w, upper);
+                pickMatch<false, true, constrained> matcher(g, vcmap, hn, rand_pool, vperm, n, perm_length, vtx_w, upper, constraint);
                 if(!is_host_space && g.nnz() / g.numRows() > 32){
                     Kokkos::parallel_for("Potential matches (random)", team_policy_t(perm_length, Kokkos::AUTO), matcher);
                 } else {
                     Kokkos::parallel_for("Potential matches (random)", policy_t(0, perm_length), matcher);
                 }
             } else {
-                pickMatch<false, false> matcher(g, vcmap, hn, rand_pool, vperm, n, perm_length, vtx_w, upper);
+                pickMatch<false, false, constrained> matcher(g, vcmap, hn, rand_pool, vperm, n, perm_length, vtx_w, upper, constraint);
                 if(!is_host_space && g.nnz() / g.numRows() > 32){
                     Kokkos::parallel_for("Potential matches (heavy)", team_policy_t(perm_length, Kokkos::AUTO), matcher);
                 } else {
@@ -616,6 +625,8 @@ public:
                 ordinal_t mappable;
                 Kokkos::parallel_scan("scan unmapped", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
                     if(vcmap(i) == ORD_MAX && g.graph.row_map(i+1) - g.graph.row_map(i) == 1){
+                        ordinal_t v = g.graph.entries(g.graph.row_map(i));
+                        if(constrained && constraint(v) != constraint(i)) return;
                         if(final){
                             unmappedVtx(update) = i;
                         }
@@ -657,6 +668,7 @@ public:
                     hasher_t hasher;
                     Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, g.graph.row_map(u), g.graph.row_map(u + 1)), [=](const edge_offset_t j, uint64_t& thread_sum) {
                         uint64_t x = g.graph.entries(j);
+                        if(constrained && constraint(x) != constraint(u)) return;
                         uint64_t y = hasher(x);
                         //I think hasher returns 32 bits so we need to extend it to 64
                         y = y*y + y;
@@ -695,6 +707,7 @@ public:
                     // select the lowest degree adjacent vertex
                     for (edge_offset_t j = g.graph.row_map(u); j < g.graph.row_map(u + 1); j++) {
                         ordinal_t v = g.graph.entries(j);
+                        if(constrained && constraint(v) != constraint(u)) continue;
                         ordinal_t vdeg = g.graph.row_map(v+1) - g.graph.row_map(v);
                         if (min_deg > vdeg) {
                             min_deg = vdeg;

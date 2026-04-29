@@ -435,12 +435,14 @@ coarse_level_t build_coarse_graph(const coarse_level_t level,
     return next_level;
 }
 
+template <bool constrained>
 coarse_map_t generate_coarse_mapping(const matrix_t g,
     const wgt_vt& vtx_w,
     bool uniform_weights,
     pool_t& rand_pool,
     experiment_data<scalar_t>& experiment,
-    ordinal_t upper) {
+    ordinal_t upper,
+    vtx_vt constraint) {
 
     Kokkos::Timer timer;
     coarse_map_t interpolation_graph;
@@ -474,7 +476,7 @@ coarse_map_t generate_coarse_mapping(const matrix_t g,
             break;
         case Match:
         case MtMetis:
-            interpolation_graph = mapper.coarsen_match(g, uniform_weights, rand_pool, choice, vtx_w, upper);
+            interpolation_graph = mapper.template coarsen_match<constrained>(g, uniform_weights, rand_pool, choice, vtx_w, upper, constraint);
             break;
     }
     Kokkos::fence();
@@ -482,7 +484,15 @@ coarse_map_t generate_coarse_mapping(const matrix_t g,
     return interpolation_graph;
 }
 
-std::list<coarse_level_t> generate_coarse_graphs(const matrix_t fine_g, const wgt_vt vweights, mem_t& mem, experiment_data<scalar_t>& experiment, ordinal_t upper, bool uniform_eweights = false) {
+void downsample(vtx_vt in, vtx_vt out, vtx_vt map){
+    Kokkos::parallel_for("set v weights", policy_t(0, in.extent(0)), KOKKOS_LAMBDA(const ordinal_t i){
+        ordinal_t c = map(i);
+        out(c) = in(i);
+    });
+}
+
+template <bool constrained>
+std::list<coarse_level_t> generate_coarse_graphs(const matrix_t fine_g, const wgt_vt vweights, mem_t& mem, experiment_data<scalar_t>& experiment, ordinal_t upper, vtx_vt& constraint, bool uniform_eweights = false) {
     std::list<coarse_level_t> levels;
     coarse_level_t finest;
     finest.mtx = fine_g;
@@ -496,7 +506,7 @@ std::list<coarse_level_t> generate_coarse_graphs(const matrix_t fine_g, const wg
 
         coarse_level_t current_level = *levels.rbegin();
 
-        coarse_map_t interp_graph = generate_coarse_mapping(current_level.mtx, current_level.vtx_w, current_level.uniform_weights, rand_pool, experiment, upper);
+        coarse_map_t interp_graph = generate_coarse_mapping<constrained>(current_level.mtx, current_level.vtx_w, current_level.uniform_weights, rand_pool, experiment, upper, constraint);
 
         if (interp_graph.coarse_vtx < min_allowed_vtx || interp_graph.coarse_vtx >= 0.9*current_level.mtx.numRows()) {
             break;
@@ -509,6 +519,11 @@ std::list<coarse_level_t> generate_coarse_graphs(const matrix_t fine_g, const wg
         timer.reset();
 
         levels.push_back(next_level);
+        if(constrained) {
+            vtx_vt next_constraint("next constraint", interp_graph.coarse_vtx);
+            downsample(constraint, next_constraint, interp_graph.map);
+            constraint = next_constraint;
+        }
 
         if(levels.size() > max_levels) break;
 #ifdef DEBUG
