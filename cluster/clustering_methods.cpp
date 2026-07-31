@@ -43,8 +43,18 @@ namespace clustering_methods {
         return level;
     }
 
+    void check_overwgt(const wgt_vt vtx_w, const scalar_t upper_bound){
+        ordinal_t total_overwgt = 0;
+        Kokkos::parallel_reduce("check overweight", policy_t(0, vtx_w.extent(0)), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update){
+            if(vtx_w(i) > upper_bound) update++;
+        }, total_overwgt);
+        if(total_overwgt > 0) {
+            std::cout << "Total overweight vertices: " << total_overwgt << "/" << vtx_w.extent(0) << std::endl;
+        }
+    }
+
     template <bool plus, bool constrained>
-    std::list<coarse_level_t> leiden_part(mem_t& mem, wg_t top, rfd_t& rfd, vtx_vt& constraint, const ordinal_t upper_bound_in){
+    std::list<coarse_level_t> leiden_part(mem_t& mem, wg_t top, rfd_t& rfd, vtx_vt& constraint, const ordinal_t upper_bound_in, const ordinal_t upper_bound_max, const ordinal_t target){
         std::vector<wg_t> levels;
         std::list<coarse_level_t> output;
         output.push_back(wg_to_level(top));
@@ -57,15 +67,16 @@ namespace clustering_methods {
             });
         // } else Kokkos::deep_copy(part, input);
         bool setzero = true;
-        while(true) {
+        int limit = 0;
+        int last_add = 0;
+        while(levels[levels.size() - 1].mtx.numRows() > target && limit++ < 100) {
             wg_t c = levels[levels.size() - 1];
-            // double old_obj = rfd.obj;
             // orderings must be generated for use in local_move and build_coarse_graph
             order::generate_orderings(mem, c.mtx);
+            // check_overwgt(c.vtx_w, upper_bound);
+            // double old = rfd.obj;
             lm_t::local_move<constrained>(c, part, rfd, (levels.size() == 1), mem, constraint, true, upper_bound);
-            // if(rfd.label_count == c.mtx.numRows()){
-            //     break;
-            // }
+            // std::cout << "lambda=" << rfd.lambda << ": " << old << " -> " << rfd.obj << std::endl;
             vtx_vt louv = part;
             int coarse_vtx_count = 0;
             vtx_vt coarse_map;
@@ -93,15 +104,21 @@ namespace clustering_methods {
                     downsample(constraint, next_constraint, coarse_map);
                     constraint = next_constraint;
                 }
+                last_add = 0;
             } else if (setzero) {
-                rfd.lambda = 0;
+                rfd.lambda /= 1.5;
                 rfd.update_objective();
-                upper_bound = upper_bound_in * 2;
-                setzero = false;
-            } else {
-                break;
+                upper_bound = upper_bound * 2;
+                if(upper_bound > upper_bound_max) upper_bound = upper_bound_max;
+                last_add++;
+                // std::cout << "upper bound: " << upper_bound << std::endl;
+                // std::cout << "lambda: " << rfd.lambda << std::endl;
+                // std::cout << "vtx count: " << c.mtx.numRows() << std::endl;
+                // setzero = false;
             }
         }
+        std::cout << "Iterations since last added level: " << last_add << std::endl;
+        std::cout << "Total iterations: " << limit << std::endl;
 
         return output;
     }
@@ -254,10 +271,10 @@ namespace clustering_methods {
     }
 
     // explicit template instantiations
-    template std::list<coarse_level_t> leiden_part<true, true>(mem_t& mem, wg_t top, rfd_t& rfd, vtx_vt& input, const ordinal_t upper_bound);
-    template std::list<coarse_level_t> leiden_part<true, false>(mem_t& mem, wg_t top, rfd_t& rfd, vtx_vt& input, const ordinal_t upper_bound);
-    template std::list<coarse_level_t> leiden_part<false, true>(mem_t& mem, wg_t top, rfd_t& rfd, vtx_vt& input, const ordinal_t upper_bound);
-    template std::list<coarse_level_t> leiden_part<false, false>(mem_t& mem, wg_t top, rfd_t& rfd, vtx_vt& input, const ordinal_t upper_bound);
+    template std::list<coarse_level_t> leiden_part<true, true>(mem_t& mem, wg_t top, rfd_t& rfd, vtx_vt& input, const ordinal_t upper_bound, const ordinal_t upper_bound_max, const ordinal_t target);
+    template std::list<coarse_level_t> leiden_part<true, false>(mem_t& mem, wg_t top, rfd_t& rfd, vtx_vt& input, const ordinal_t upper_bound, const ordinal_t upper_bound_max, const ordinal_t target);
+    template std::list<coarse_level_t> leiden_part<false, true>(mem_t& mem, wg_t top, rfd_t& rfd, vtx_vt& input, const ordinal_t upper_bound, const ordinal_t upper_bound_max, const ordinal_t target);
+    template std::list<coarse_level_t> leiden_part<false, false>(mem_t& mem, wg_t top, rfd_t& rfd, vtx_vt& input, const ordinal_t upper_bound, const ordinal_t upper_bound_max, const ordinal_t target);
 
     template std::list<coarse_level_t> louvain_part<true>(mem_t& mem, wg_t top, rfd_t& rfd, vtx_vt& constraint, const ordinal_t upper_bound);
     template std::list<coarse_level_t> louvain_part<false>(mem_t& mem, wg_t top, rfd_t& rfd, vtx_vt& constraint, const ordinal_t upper_bound);

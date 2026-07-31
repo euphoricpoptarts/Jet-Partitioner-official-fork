@@ -651,7 +651,7 @@ vtx_vt candidates_and_destinations(const wg_t& wg, const matrix_t& c_graph, cons
 }
 
 KOKKOS_INLINE_FUNCTION
-static ordinal_t gain_bucket(const scalar_t& gx, const scalar_t& vwgt){
+static ordinal_t gain_bucket(const float& gx, const scalar_t& vwgt){
     //cast to float so we can approximate log_1.5
     float gain = static_cast<float>(gx) / static_cast<float>(vwgt);
     ordinal_t gain_type = 0;
@@ -720,12 +720,13 @@ vtx_vt fix_oversized(const wg_t& wg, const vtx_vt part, mem_t& mem, refine_data&
     wgt_vt bucket_offsets = Kokkos::subview(mem.s_mem.gain1, std::make_pair(static_cast<ordinal_t>(0), t_minibuckets));
     Kokkos::deep_copy(exec_space(), bucket_offsets, 0);
     wgt_vt vscore = mem.s_mem.gain2;
+    float pen = curr_state.get_penalty_modifier();
     Kokkos::parallel_for("compute scores", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i){
         ordinal_t idx = oversized_idx(part(i));
         if(idx == -1) return;
-        // make this the full objective?
-        scalar_t gain = -pvals(i);
-        ordinal_t gain_type = gain_bucket(gain, vtx_w(i));
+        scalar_t csize = cluster_size(part(i));
+        float gain = -pvals(i) + pen*vtx_w(i)*(csize - vtx_w(i));
+        ordinal_t gain_type = gain_bucket(gain, Kokkos::min(vtx_w(i), cluster_size(part(i)) - upper_bound));
         ordinal_t g_id = (max_buckets*idx + gain_type) * sections + (i % sections);
         bid(i) = g_id;
         vscore(i) = Kokkos::atomic_fetch_add(&bucket_offsets(g_id), vtx_w(i));
@@ -1548,7 +1549,7 @@ cdata_t truncate_and_init_mem(mem_t& mem, const wg_t& wg, int label_count, bool 
     Kokkos::parallel_scan("comp conn offsets", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t& i, edge_offset_t& update, const bool final){
         ordinal_t degree = g.graph.row_map(i + 1) - g.graph.row_map(i);
         if(!top) degree *= 1.2;
-        if(degree > 2*label_count) degree = 2*label_count;
+        // if(degree > 2*label_count) degree = 2*label_count;
         if(final){
             cdata.conn_offsets(i) = update;
             cdata.conn_table_sizes(i) = degree;

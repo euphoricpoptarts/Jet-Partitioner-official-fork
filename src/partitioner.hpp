@@ -210,8 +210,9 @@ static part_vt partition(scalar_t& edge_cut,
         top.vtx_w = vweights;
         top.edge_uniform = true;
         vtx_vt dummy_constraint;//("constraint", g.numRows());
-        std::list<coarse_level_t> cg_list = jet_community::clustering_methods::leiden_part<false, false>(mem, top, rfd, dummy_constraint, cluster_limit);
-        // std::list<coarse_level_t> cg_list_part2 = coarsener.generate_coarse_graphs(cg_list.back().mtx, cg_list.back().vtx_w, mem, experiment, cluster_limit*2, false);
+        std::list<coarse_level_t> cg_list = jet_community::clustering_methods::leiden_part<false, false>(mem, top, rfd, dummy_constraint, cluster_limit, upper, cutoff * 2);
+        // std::list<coarse_level_t> cg_list = coarsener.template generate_coarse_graphs<false>(top.mtx, top.vtx_w, mem, experiment, g.numRows(), dummy_constraint, true);
+        // std::list<coarse_level_t> cg_list_part2 = coarsener.generate_coarse_graphs(cg_list.back().mtx, cg_list.back().vtx_w, mem, experiment, upper, false);
         // cg_list_part2.pop_front();
         // cg_list.splice(cg_list.end(), cg_list_part2);
         Kokkos::fence();
@@ -219,7 +220,8 @@ static part_vt partition(scalar_t& edge_cut,
         experiment.addMeasurement(Measurement::Coarsen, fin_coarsening_time - start_time);
         double imb_ratio = config.max_imb_ratio;
         part_vt coarsest_p = init_t::metis_init(cg_list.back().mtx, cg_list.back().vtx_w, k, imb_ratio);
-        //part_vt coarsest_p = init_t::random_init(cg_list.back().vtx_w, k, imb_ratio);
+        // part_vt coarsest_p = init_t::init(cg_list.back().mtx, cg_list.back().vtx_w, k, imb_ratio);
+        // part_vt coarsest_p = init_t::random_init(cg_list.back().vtx_w, k, imb_ratio);
         Kokkos::fence();
         experiment.addMeasurement(Measurement::InitPartition, t.seconds() - fin_coarsening_time);
         part = uncoarsener_t::uncoarsen(cg_list, coarsest_p, config,
@@ -228,7 +230,8 @@ static part_vt partition(scalar_t& edge_cut,
         fin_uncoarsening = t.seconds();
     }
     Kokkos::fence();
-    for(int i = 0; i < 10; i++) {
+    // currently an error with huge-bubbles-0000 and large lambda
+    for(int i = 0; i < 0; i++) {
         normalized_lcc rfd(g, vweights, lambda, true);
         mem_t mem(g, k, rfd);
         wg_t top;
@@ -237,9 +240,8 @@ static part_vt partition(scalar_t& edge_cut,
         top.edge_uniform = true;
         vtx_vt constraint("constraint", g.numRows());
         Kokkos::deep_copy(constraint, part);
-        std::list<coarse_level_t> cg_list = jet_community::clustering_methods::leiden_part<false, true>(mem, top, rfd, constraint, cluster_limit);
+        std::list<coarse_level_t> cg_list = jet_community::clustering_methods::leiden_part<false, true>(mem, top, rfd, constraint, cluster_limit, upper, cutoff);
         Kokkos::fence();
-        double imb_ratio = config.max_imb_ratio;
         part = uncoarsener_t::uncoarsen(cg_list, constraint, config,
             edge_cut, mem, experiment);
         Kokkos::fence();
