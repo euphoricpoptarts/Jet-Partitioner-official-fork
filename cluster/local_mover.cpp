@@ -726,7 +726,7 @@ vtx_vt fix_oversized(const wg_t& wg, const vtx_vt part, mem_t& mem, refine_data&
         if(idx == -1) return;
         scalar_t csize = cluster_size(part(i));
         float gain = -pvals(i) + pen*vtx_w(i)*(csize - vtx_w(i));
-        ordinal_t gain_type = gain_bucket(gain, Kokkos::min(vtx_w(i), cluster_size(part(i)) - upper_bound));
+        ordinal_t gain_type = gain_bucket(gain, Kokkos::min(vtx_w(i), csize - upper_bound));
         ordinal_t g_id = (max_buckets*idx + gain_type) * sections + (i % sections);
         bid(i) = g_id;
         vscore(i) = Kokkos::atomic_fetch_add(&bucket_offsets(g_id), vtx_w(i));
