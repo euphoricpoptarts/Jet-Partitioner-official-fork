@@ -5,6 +5,7 @@
 #include <iostream>
 #include <cstdint>
 #include "core_types.h"
+#include "weighted_graph.h"
 
 struct cluster_data {
     using Device = typename matrix_t::device_type;
@@ -13,9 +14,12 @@ struct cluster_data {
     using wgt_vt = Kokkos::View<scalar_t*, Device>;
     using exec_space = typename matrix_t::execution_space;
     using policy_t = Kokkos::RangePolicy<exec_space>;
+    using wg_t = jet_community::weighted_graph;
 
     // metadata that is preserved between levels in the clustering scheme
     wgt_vt total_deg;
+    wgt_vt total_wgt;
+    bool reuse_deg_as_wgt;
     edge_offset_t uncut = 0;
     edge_offset_t top_nnz = 0;
     double obj = -1.0;
@@ -35,28 +39,41 @@ struct cluster_data {
         return result;
     }
 
-    cluster_data(const matrix_t g, const wgt_vt wdeg, double _lambda) {
-        total_deg = wgt_vt("total degree of clusters", g.numRows());
+    cluster_data(const wg_t wg, double _lambda) {
+        matrix_t g = wg.mtx;
+        reuse_deg_as_wgt = wg.reuse_w_as_pen;
+        total_deg = wgt_vt(Kokkos::ViewAllocateWithoutInitializing("total degree of clusters"), g.numRows());
+        if (reuse_deg_as_wgt) total_wgt = total_deg;
+        else total_wgt = wgt_vt(Kokkos::ViewAllocateWithoutInitializing("total wgt of clusters"), g.numRows());
+        Kokkos::deep_copy(exec_space(), total_deg, wg.v_pen);
+        if(!reuse_deg_as_wgt) Kokkos::deep_copy(exec_space(), total_wgt, wg.vtx_w);
         top_nnz = g.nnz();
-        Kokkos::deep_copy(exec_space(), total_deg, wdeg);
         uncut = 0;
         label_count = g.numRows();
         lambda = _lambda;
         update_objective();
     }
 
-    void reset(const matrix_t g, const wgt_vt wdeg) {
-        wgt_vt td_lhs = Kokkos::subview(total_deg, std::make_pair((ordinal_t)0, g.numRows()));
-        Kokkos::deep_copy(td_lhs, wdeg);
+    void reset(const wg_t wg) {
+        wgt_vt td_lhs = Kokkos::subview(total_deg, std::make_pair((ordinal_t)0, wg.mtx.numRows()));
+        wgt_vt tw_lhs = Kokkos::subview(total_wgt, std::make_pair((ordinal_t)0, wg.mtx.numRows()));
+        Kokkos::deep_copy(td_lhs, wg.v_pen);
+        if(!reuse_deg_as_wgt) Kokkos::deep_copy(tw_lhs, wg.vtx_w);
         uncut = 0;
-        label_count = g.numRows();
+        label_count = wg.mtx.numRows();
         update_objective();
     }
 
     void copy(const cluster_data& rhs){
+        reuse_deg_as_wgt = rhs.reuse_deg_as_wgt;
         wgt_vt td_lhs = Kokkos::subview(total_deg, std::make_pair((ordinal_t)0, rhs.label_count));
         wgt_vt td_rhs = Kokkos::subview(rhs.total_deg, std::make_pair((ordinal_t)0, rhs.label_count));
         Kokkos::deep_copy(exec_space(), td_lhs, td_rhs);
+        if(!reuse_deg_as_wgt){
+            wgt_vt tw_lhs = Kokkos::subview(total_wgt, std::make_pair((ordinal_t)0, rhs.label_count));
+            wgt_vt tw_rhs = Kokkos::subview(rhs.total_wgt, std::make_pair((ordinal_t)0, rhs.label_count));
+            Kokkos::deep_copy(exec_space(), tw_lhs, tw_rhs);
+        }
         top_nnz = rhs.top_nnz;
         uncut = rhs.uncut;
         obj = rhs.obj;
@@ -66,6 +83,8 @@ struct cluster_data {
 
     cluster_data(const cluster_data& rhs){
         total_deg = wgt_vt(Kokkos::ViewAllocateWithoutInitializing("total degree of clusters"), rhs.total_deg.extent(0));
+        if(rhs.reuse_deg_as_wgt) total_wgt = total_deg;
+        else total_wgt = wgt_vt(Kokkos::ViewAllocateWithoutInitializing("total wgt of clusters"), rhs.total_wgt.extent(0));
         copy(rhs);
     }
 
@@ -97,6 +116,7 @@ struct cluster_data {
 
     friend std::ostream& operator<<(std::ostream& os, const cluster_data& cd) {
         os << "Cut: " << (cd.top_nnz - cd.uncut) / 2 << "; ";
+        os << "Lambda: " << cd.lambda << "; ";
         cd.print(os);
         os << "; Labels: " << cd.label_count;
         return os;
@@ -113,12 +133,13 @@ struct modularity : public cluster_data {
 
     double inv_gdeg = 0;
 
-    modularity(const matrix_t g, const wgt_vt wdeg, double _penalty_scale, bool uniform) : cluster_data(g, wdeg, 1.0) {
+    modularity(const wg_t wg, double _penalty_scale) : cluster_data(wg, 1.0) {
         edge_offset_t g_deg = 0;
-        if(uniform) g_deg = g.nnz();
-        else g_deg = cluster_data::sum(wdeg);
+        if(wg.edge_uniform) g_deg = wg.mtx.nnz();
+        else g_deg = cluster_data::sum(wg.v_pen);
         inv_gdeg = 1.0 / static_cast<double>(g_deg);
         cluster_data::lambda = _penalty_scale * inv_gdeg;
+        cluster_data::update_objective();
     }
 
     virtual double get_objective() const override {
@@ -139,9 +160,10 @@ struct constant_potts : public cluster_data {
 
     ordinal_t v_total = 0;
 
-    constant_potts(const matrix_t g, const wgt_vt wdeg, double _penalty_scale) : cluster_data(g, wdeg, 1.0) {
-        v_total = g.numRows();
-        cluster_data::lambda = _penalty_scale * 0.5;
+    constant_potts(const wg_t wg, double _penalty_scale) : cluster_data(wg, 1.0) {
+        v_total = wg.mtx.numRows();
+        cluster_data::lambda = _penalty_scale;
+        cluster_data::update_objective();
     }
 
     virtual double get_objective() const override {
@@ -162,12 +184,13 @@ struct normalized_lcc : public cluster_data {
 
     edge_offset_t g_deg = 0;
 
-    normalized_lcc(const matrix_t g, const wgt_vt wdeg, double _penalty_scale, bool edge_uniform) : cluster_data(g, wdeg, 1.0) {
-        if(edge_uniform) g_deg = g.nnz();
-        else g_deg = cluster_data::sum(g.values);
-        uint64_t v_total = cluster_data::sum(wdeg);
+    normalized_lcc(const wg_t wg, double _penalty_scale) : cluster_data(wg, 1.0) {
+        if(wg.edge_uniform) g_deg = wg.mtx.nnz();
+        else g_deg = cluster_data::sum(wg.mtx.values);
+        uint64_t v_total = cluster_data::sum(wg.v_pen);
         double denom = static_cast<double>(v_total * v_total);
         cluster_data::lambda = _penalty_scale * static_cast<double>(g_deg) / denom;
+        cluster_data::update_objective();
     }
 
     virtual double get_objective() const override {

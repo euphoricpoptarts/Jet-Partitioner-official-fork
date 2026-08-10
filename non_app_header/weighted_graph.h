@@ -13,9 +13,11 @@ struct weighted_graph {
 
     matrix_t mtx;
     wgt_vt vtx_w;
+    wgt_vt v_pen;
     // if edge_uniform is true
     // then it is unsafe to access mtx.values
     bool edge_uniform = true;
+    bool reuse_w_as_pen = true;
 };
 
 }

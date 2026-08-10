@@ -42,7 +42,7 @@ namespace leidenR {
     void ensure_gamma_connectivity(const wg_t wg, vtx_vt vcmap, vtx_vt constraint, vtx_vt order, const wgt_vt total_deg, mem_t& mem, const refine_data& rfd) {
 
         const matrix_t g = wg.mtx;
-        const wgt_vt vtx_w = wg.vtx_w;
+        const wgt_vt vtx_w = wg.v_pen;
         const ordinal_t n = g.numRows();
         edge_vt row_map = Kokkos::subview(mem.p_mem.row_map, std::make_pair(static_cast<ordinal_t>(0), n + 1));
         vtx_vt store_atom = Kokkos::subview(mem.p_mem.entries, std::make_pair(static_cast<ordinal_t>(0), n));
@@ -268,7 +268,7 @@ namespace leidenR {
         ordinal_t& coarse_vtx_count) {
 
         matrix_t g = wg.mtx;
-        wgt_vt vtx_w = wg.vtx_w;
+        wgt_vt vtx_w = wg.v_pen;
         ordinal_t n = g.numRows();
         float gamma = rfd.get_penalty_modifier();
         vtx_vt hn = Kokkos::subview(mem.s_mem.vtx1, std::make_pair(static_cast<ordinal_t>(0), n));

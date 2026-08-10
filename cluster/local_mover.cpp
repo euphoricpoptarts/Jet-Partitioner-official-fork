@@ -105,7 +105,7 @@ void relabel_contiguously(vtx_vt labels, refine_data& rfd, mem_t& mem){
 	ordinal_t n = labels.extent(0);
     ordinal_t initial_count = rfd.label_count;
 	vtx_vt used = Kokkos::subview(mem.s_mem.vtx1, std::make_pair((ordinal_t)0, initial_count));
-    Kokkos::deep_copy(exec_space(), used, 0);
+    Kokkos::deep_copy(exec_space(), used, -1);
     // some vertices can have zero degree so some labels can have zero total degree
     // therefore we can't use rfd.total_deg to determine which labels are in use
 	Kokkos::parallel_for("mark labels", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i){
@@ -127,6 +127,17 @@ void relabel_contiguously(vtx_vt labels, refine_data& rfd, mem_t& mem){
     // Kokkos::deep_copy(exec_space(), total_deg, 0);
     total_deg = Kokkos::subview(rfd.total_deg, std::make_pair((ordinal_t)0, t_labels));
     Kokkos::deep_copy(exec_space(), total_deg, swap_total_deg);
+    if(!rfd.reuse_deg_as_wgt){
+        wgt_vt swap_total_wgt = Kokkos::subview(mem.p_mem.pvals, std::make_pair((ordinal_t)0, initial_count));
+        wgt_vt total_wgt = Kokkos::subview(rfd.total_wgt, std::make_pair((ordinal_t)0, initial_count));
+        Kokkos::deep_copy(swap_total_wgt, total_wgt);
+        Kokkos::parallel_for("swap total wgt", policy_t(0, initial_count), KOKKOS_LAMBDA(const ordinal_t i){
+            if(used(i) != -1){
+                ordinal_t update = used(i);
+                total_wgt(update) = swap_total_wgt(i);
+            }
+        });
+    }
 	Kokkos::parallel_for("relabel", policy_t(0, n), KOKKOS_LAMBDA(const ordinal_t i){
 		labels(i) = used(labels(i));
 	});
@@ -272,8 +283,10 @@ void set_new_cluster_ids(const vtx_vt& moves, const vtx_vt& part, refine_data& r
                 if(constrained) constraint(dest) = constraint(part(i));
             });
             wgt_vt td_subview = Kokkos::subview(total_deg, std::make_pair(curr_labels, rfd.label_count));
+            wgt_vt tw_subview = Kokkos::subview(rfd.total_wgt, std::make_pair(curr_labels, rfd.label_count));
             // set new labels to have zero degree
             Kokkos::deep_copy(exec_space(), td_subview, 0);
+            if(!rfd.reuse_deg_as_wgt) Kokkos::deep_copy(exec_space(), tw_subview, 0);
         }
     }
 }
@@ -303,7 +316,7 @@ struct afterburner_kernel {
         part(_part),
         dest_part(_mem.p_mem.dest_part),
         swap_bit(_mem.s_mem.zeros1),
-        vtx_w(_wg.vtx_w),
+        vtx_w(_wg.v_pen),
         save_gains(_mem.p_mem.obj_persistent),
         penalty_mod(_rfd.get_penalty_modifier()) {}
 
@@ -469,7 +482,7 @@ struct select_destinations {
         part(_part),
         dest_part(_mem.p_mem.dest_part),
         constraint(_constraint),
-        vtx_w(_wg.vtx_w),
+        vtx_w(_wg.v_pen),
         pvals(_mem.p_mem.pvals),
         total_deg(_rfd.total_deg),
         save_gains(_mem.p_mem.obj_persistent),
@@ -687,7 +700,7 @@ template <bool constrained>
 vtx_vt fix_oversized(const wg_t& wg, const vtx_vt part, mem_t& mem, refine_data& curr_state, scalar_t upper_bound, vtx_vt constraint) {
     const matrix_t& g = wg.mtx;
     const wgt_vt vtx_w = wg.vtx_w;
-    const wgt_vt cluster_size = curr_state.total_deg;
+    const wgt_vt cluster_size = curr_state.total_wgt;
     ordinal_t n = g.numRows();
     vtx_vt oversized_idx = mem.s_mem.vtx1;
     vtx_vt moves = mem.s_mem.vtx2;
@@ -832,8 +845,11 @@ vtx_vt fix_oversized(const wg_t& wg, const vtx_vt part, mem_t& mem, refine_data&
     if(needed > empty_clusters) {
         ordinal_t extra = needed - empty_clusters;
         curr_state.label_count += extra;
+        wgt_vt total_deg = curr_state.total_deg;
+        bool reused = curr_state.reuse_deg_as_wgt;
         Kokkos::parallel_for("print", policy_t(labels, curr_state.label_count), KOKKOS_LAMBDA(const ordinal_t i){
             cluster_size(i) = 0;
+            if(!reused) total_deg(i) = 0;
         });
         labels = curr_state.label_count;
         // if(labels > n) printf("labels: %i, n: %i\n", labels, n);
@@ -1502,16 +1518,23 @@ void init_conn_graph(const wg_t& wg, const vtx_vt& part, cdata_t& cdata, mem_t& 
 template <bool uniform>
 void perform_moves(const wg_t& wg, vtx_vt part, const vtx_vt swaps, cdata_t& cdata, mem_t& mem, refine_data& curr_state){
     const wgt_vt& vtx_w = wg.vtx_w;
+    const wgt_vt& v_pen = wg.v_pen;
     vtx_vt dest_part = Kokkos::subview(mem.p_mem.dest_part, std::make_pair(static_cast<ordinal_t>(0), wg.mtx.numRows()));
     ordinal_t total_moves = swaps.extent(0);
     wgt_vt pvals = mem.p_mem.pvals;
     wgt_vt total_deg = curr_state.total_deg;
+    wgt_vt total_wgt = curr_state.total_wgt;
+    bool reused = curr_state.reuse_deg_as_wgt;
     Kokkos::parallel_for("update total deg", policy_t(0, total_moves), KOKKOS_LAMBDA(const ordinal_t& x){
         ordinal_t i = swaps(x);
         ordinal_t best = dest_part(i);
         ordinal_t p = part(i);
-        Kokkos::atomic_add(&total_deg(p), -vtx_w(i));
-        Kokkos::atomic_add(&total_deg(best), vtx_w(i));
+        Kokkos::atomic_add(&total_deg(p), -v_pen(i));
+        Kokkos::atomic_add(&total_deg(best), v_pen(i));
+        if(!reused){
+            Kokkos::atomic_add(&total_wgt(p), -vtx_w(i));
+            Kokkos::atomic_add(&total_wgt(best), vtx_w(i));
+        }
     });
     //change part assignments and update part sizes
     if(!cdata.init || total_moves >= wg.mtx.numRows() * 0.03){
@@ -1582,11 +1605,9 @@ template <bool constrained>
 void local_move(const wg_t wg, vtx_vt best_part, refine_data& best_state, bool is_initial, mem_t& mem, vtx_vt constraint, bool enable_simulated_annealing, const ordinal_t upper_bound){
     const matrix_t g = wg.mtx;
     vtx_vt dead_bit = mem.p_mem.lock_bit;
-    wgt_vt vtx_w = wg.vtx_w;
     // vertices that are oversized before clustering can not join any clusters, nor can their cluster be joined
     Kokkos::parallel_for("lock overwgt", policy_t(0, g.numRows()), KOKKOS_LAMBDA(const ordinal_t i){
-        if(vtx_w(i) >= upper_bound) dead_bit(i) = 1;
-        else dead_bit(i) = 0;
+        dead_bit(i) = 0;
     });
     vtx_vt c_constraint;
     if(constrained){
