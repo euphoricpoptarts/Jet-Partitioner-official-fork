@@ -466,7 +466,6 @@ struct select_destinations {
     const float filter_ratio;
     const ordinal_t n;
     const bool truncated;
-    const vtx_vt dead_bit;
 
     select_destinations(const vtx_vt _vtx_list,
         const wg_t& _wg,
@@ -489,8 +488,7 @@ struct select_destinations {
         penalty_mod(_rfd.get_penalty_modifier()),
         filter_ratio(_filter_ratio),
         n(_wg.mtx.numRows()),
-        truncated(_truncated),
-        dead_bit(_mem.p_mem.lock_bit) {}
+        truncated(_truncated) {}
 
     KOKKOS_FUNCTION
     void operator()(const ordinal_t x) const {
@@ -515,7 +513,6 @@ struct select_destinations {
             else j_val = c_graph.values(j);
             if(j_val > 0 && j_val >= b_conn){
                 ordinal_t px = c_graph.graph.entries(j);
-                if(dead_bit(px)) continue;
                 if(constrained && constraint(px) != constraint(p)) continue;
                 float j_conn = j_val - static_cast<float>(total_deg(px))*multi;
                 if(j_conn >= b_conn){
@@ -531,10 +528,6 @@ struct select_destinations {
         } else if(p_conn < 0){
             gain = -p_conn;
             best = NEW_PART;
-        }
-        if(dead_bit(i)){
-            best = NO_MOVE;
-            gain = OBJ_MIN;
         }
         save_gains(i) = gain;
         dest_part(i) = best;
@@ -567,7 +560,6 @@ struct select_destinations {
             else j_val = c_graph.values(j);
             if(j_val > 0 && j_val >= maxl){
                 ordinal_t px = c_graph.graph.entries(j);
-                if(dead_bit(px)) continue;
                 if(constrained && constraint(px) != constraint(p)) continue;
                 float j_conn = j_val - static_cast<float>(total_deg(px))*multi;
                 if(j_conn >= maxl){
@@ -578,7 +570,6 @@ struct select_destinations {
             }
         }
         maxl -= p_conn;
-        if(dead_bit(i)) argmax = NO_MOVE;
         // no_move has a "gain" of negative infinity for the purposes of the afterburner filter
         if(argmax == NO_MOVE) maxl = OBJ_MIN;
         float oldmaxl = maxl;
@@ -705,11 +696,10 @@ vtx_vt fix_oversized(const wg_t& wg, const vtx_vt part, mem_t& mem, refine_data&
     vtx_vt oversized_idx = mem.s_mem.vtx1;
     vtx_vt moves = mem.s_mem.vtx2;
     vtx_vt bid = mem.s_mem.vtx3;
-    vtx_vt dead_bit = mem.p_mem.lock_bit;
     ordinal_t labels = curr_state.label_count;
     ordinal_t total_oversized = 0;
     Kokkos::parallel_scan("compute oversized idx", policy_t(0, labels), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
-        if(cluster_size(i) > upper_bound && dead_bit(i) == 0){
+        if(cluster_size(i) > upper_bound){
             if(final){
                 oversized_idx(i) = update;
             }
@@ -798,7 +788,7 @@ vtx_vt fix_oversized(const wg_t& wg, const vtx_vt part, mem_t& mem, refine_data&
     // compute number of new clusters needed
     // evicted vertices are sent to "overflow" clusters created for each oversized cluster
     Kokkos::parallel_scan("compute oversized idx", policy_t(0, labels), KOKKOS_LAMBDA(const ordinal_t i, ordinal_t& update, const bool final){
-        if(cluster_size(i) > upper_bound && dead_bit(i) == 0){
+        if(cluster_size(i) > upper_bound){
             if(final){
                 oversized_idx(i) = update;
             }
@@ -1604,11 +1594,6 @@ void clone_pval(mem_t& mem, ordinal_t n){
 template <bool constrained>
 void local_move(const wg_t wg, vtx_vt best_part, refine_data& best_state, bool is_initial, mem_t& mem, vtx_vt constraint, bool enable_simulated_annealing, const ordinal_t upper_bound){
     const matrix_t g = wg.mtx;
-    vtx_vt dead_bit = mem.p_mem.lock_bit;
-    // vertices that are oversized before clustering can not join any clusters, nor can their cluster be joined
-    Kokkos::parallel_for("lock overwgt", policy_t(0, g.numRows()), KOKKOS_LAMBDA(const ordinal_t i){
-        dead_bit(i) = 0;
-    });
     vtx_vt c_constraint;
     if(constrained){
         c_constraint = vtx_vt("cluster constraint", g.numRows());
