@@ -162,8 +162,8 @@ namespace clustering_methods {
         ordinal_t upper_bound = upper_bound_in;
         int limit = 0;
         bool grow_upper = false;
+        rfd_t copy(rfd);
         while(levels[levels.size() - 1].mtx.numRows() > target && limit++ < 100) {
-            edge_offset_t last_uncut = rfd.uncut;
             wg_t c = levels[levels.size() - 1];
             vtx_vt part("cluster assignments", c.mtx.numRows());
             Kokkos::parallel_for("set initial assignments", policy_t(0, c.mtx.numRows()), KOKKOS_LAMBDA(const ordinal_t x){
@@ -171,6 +171,7 @@ namespace clustering_methods {
             });
             // orderings must be generated for use in local_move and build_coarse_graph
             order::generate_orderings(mem, c.mtx);
+            copy.copy(rfd);
             lm_t::local_move<constrained>(c, part, rfd, true, mem, constraint, true, upper_bound);
             // the user clearly cares about quality if they are doing multiple iterations
             // if(constrained && rfd.label_count == c.mtx.numRows()){
@@ -190,15 +191,11 @@ namespace clustering_methods {
                 }
                 grow_upper = true;
             } else {
-                rfd.label_count = c.mtx.numRows();
-                wgt_vt td_rfd = Kokkos::subview(rfd.total_deg, std::make_pair((ordinal_t)0, rfd.label_count));
-                Kokkos::deep_copy(td_rfd, c.vtx_w);
-                rfd.uncut = last_uncut;
+                rfd.copy(copy);
                 if(grow_upper) {
                     upper_bound = upper_bound * 2;
                     if(upper_bound > upper_bound_max) upper_bound = upper_bound_max;
                 }
-                // last_add++;
             }
             rfd.lambda /= 1.5;
             rfd.update_objective();
