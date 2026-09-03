@@ -19,6 +19,8 @@ namespace clustering_methods {
     using scalar_t = typename matrix_t::value_type;
     using wgt_vt = typename Kokkos::View<scalar_t*, Device>;
     using policy_t = typename Kokkos::RangePolicy<exec_space>;
+    using team_policy_t = typename Kokkos::TeamPolicy<exec_space>;
+    using member = typename team_policy_t::member_type;
 
     void coarsen_vtx_w(wgt_vt in, wgt_vt out, vtx_vt map){
         Kokkos::parallel_for("set v weights", policy_t(0, in.extent(0)), KOKKOS_LAMBDA(const ordinal_t i){
@@ -62,6 +64,75 @@ namespace clustering_methods {
         }
     }
 
+    double avg_edge(const wg_t c, rfd_t& rfd) {
+        wgt_vt vtx_w = c.v_pen;
+        double pen = rfd.get_penalty_modifier();
+        double total_pen = 0;
+        matrix_t g = c.mtx;
+        Kokkos::parallel_reduce("sum edges", team_policy_t(g.numRows(), Kokkos::AUTO), KOKKOS_LAMBDA(const member& t, double& update){
+            ordinal_t i = t.league_rank();
+            double inner_sum = 0;
+            Kokkos::parallel_reduce(Kokkos::TeamThreadRange(t, g.graph.row_map(i), g.graph.row_map(i+1)), [&](const edge_offset_t j, double& inner_update){
+                ordinal_t v = g.graph.entries(j);
+                inner_update += vtx_w(i)*vtx_w(v);
+            }, inner_sum);
+            Kokkos::single(Kokkos::PerTeam(t), [&](){
+                update += inner_sum;
+            });
+        }, total_pen);
+        double total_ben = 0;
+        Kokkos::parallel_reduce("sum edges 2", policy_t(0, g.nnz()), KOKKOS_LAMBDA(const edge_offset_t j, double& update){
+            update += g.values(j);
+        }, total_ben);
+        double total = total_ben - pen*total_pen;
+        std::cout << "Average edge weight: " << total / g.nnz() << "; total edges: " << g.nnz() << std::endl;
+        return total / g.nnz();
+    }
+
+    double nonneg_vtx(const wg_t c, const rfd_t& rfd, const scalar_t upper) {
+        wgt_vt vtx_w = c.v_pen;
+        double pen = rfd.get_penalty_modifier();
+        ordinal_t total_nonneg = 0;
+        matrix_t g = c.mtx;
+        Kokkos::parallel_reduce("sum edges", team_policy_t(g.numRows(), Kokkos::AUTO), KOKKOS_LAMBDA(const member& t, ordinal_t& update){
+            ordinal_t i = t.league_rank();
+            ordinal_t inner_sum = 0;
+            Kokkos::parallel_reduce(Kokkos::TeamThreadRange(t, g.graph.row_map(i), g.graph.row_map(i+1)), [&](const edge_offset_t j, ordinal_t& inner_update){
+                ordinal_t v = g.graph.entries(j);
+                double val = g.values(j) - pen*vtx_w(i)*vtx_w(v);
+                if(val >= 0 && vtx_w(i) + vtx_w(v) <= upper) inner_update++;
+            }, inner_sum);
+            Kokkos::single(Kokkos::PerTeam(t), [&](){
+                if(inner_sum > 0) update++;
+            });
+        }, total_nonneg);
+        double ratio = static_cast<double>(total_nonneg) / g.numRows();
+        std::cout << "Ratio of nonnegative vertices: " << ratio << "; total vertices: " << g.numRows() << std::endl;
+        return ratio;
+    }
+
+    double nonneg(const wg_t c, rfd_t& rfd) {
+        wgt_vt vtx_w = c.v_pen;
+        double pen = rfd.get_penalty_modifier();
+        ordinal_t total_nonneg = 0;
+        matrix_t g = c.mtx;
+        Kokkos::parallel_reduce("sum edges", team_policy_t(g.numRows(), Kokkos::AUTO), KOKKOS_LAMBDA(const member& t, ordinal_t& update){
+            ordinal_t i = t.league_rank();
+            ordinal_t inner_sum = 0;
+            Kokkos::parallel_reduce(Kokkos::TeamThreadRange(t, g.graph.row_map(i), g.graph.row_map(i+1)), [&](const edge_offset_t j, ordinal_t& inner_update){
+                ordinal_t v = g.graph.entries(j);
+                double val = g.values(j) - pen*vtx_w(i)*vtx_w(v);
+                if(val >= 0) inner_update++;
+            }, inner_sum);
+            Kokkos::single(Kokkos::PerTeam(t), [&](){
+                update += inner_sum;
+            });
+        }, total_nonneg);
+        double ratio = static_cast<double>(total_nonneg) / g.nnz();
+        std::cout << "Ratio of nonnegative edges: " << ratio << "; total edges: " << g.nnz() << std::endl;
+        return ratio;
+    }
+
     template <bool is_leiden>
     wg_t generate_next_level(const wg_t c, vtx_vt coarse_map, ordinal_t coarse_vtx_count, mem_t& mem, rfd_t& rfd){
         wg_t next_level;
@@ -101,7 +172,8 @@ namespace clustering_methods {
         int last_add = 0;
         bool imp = false;
         rfd_t copy(rfd);
-        while(levels[levels.size() - 1].mtx.numRows() > target && limit++ < 100) {
+        while(levels[levels.size() - 1].mtx.numRows() > target && (!imp || last_add < 5)) {
+            limit++;
             wg_t c = levels[levels.size() - 1];
             // orderings must be generated for use in local_move and build_coarse_graph
             order::generate_orderings(mem, c.mtx);
@@ -115,6 +187,7 @@ namespace clustering_methods {
             if(levels.size() == 1 && c.edge_uniform) coarse_map = lr_t::template coarsen_leidenR<true, true>(c, louv, mem, rfd, coarse_vtx_count);
             else if(levels.size() == 1 && !(c.edge_uniform)) coarse_map = lr_t::template coarsen_leidenR<true, false>(c, louv, mem, rfd, coarse_vtx_count);
             else coarse_map = lr_t::template coarsen_leidenR<false, false>(c, louv, mem, rfd, coarse_vtx_count);
+            bool added = false;
             if(coarse_vtx_count < c.mtx.numRows() * 0.9){
                 wg_t next_level = generate_next_level<true>(c, coarse_map, coarse_vtx_count, mem, rfd);
                 levels.push_back(next_level);
@@ -129,7 +202,9 @@ namespace clustering_methods {
                 }
                 last_add = 0;
                 imp = true;
-            } else {
+                added = true;
+            }
+            if(!added) {
                 if(imp){
                     upper_bound = upper_bound * 2;
                     if(upper_bound > upper_bound_max) upper_bound = upper_bound_max;
@@ -137,13 +212,9 @@ namespace clustering_methods {
                 rfd.copy(copy);
                 Kokkos::deep_copy(part, pcopy);
                 last_add++;
-                rfd.lambda /= 1.5;
-                rfd.update_objective();
-                // std::cout << "upper bound: " << upper_bound << std::endl;
-                // std::cout << "lambda: " << rfd.lambda << std::endl;
-                // std::cout << "vtx count: " << c.mtx.numRows() << std::endl;
-                // setzero = false;
             }
+            rfd.lambda /= 1.5;
+            rfd.update_objective();
         }
         std::cout << "Iterations since last added level: " << last_add << std::endl;
         std::cout << "Total iterations: " << limit << std::endl;
@@ -158,12 +229,13 @@ namespace clustering_methods {
         std::list<coarse_level_t> output;
         output.push_back(wg_to_level(top));
         levels.push_back(top);
-        bool drop_constraint = false;//constrained;
         ordinal_t upper_bound = upper_bound_in;
         int limit = 0;
-        bool grow_upper = false;
+        int last_add = 0;
         rfd_t copy(rfd);
-        while(levels[levels.size() - 1].mtx.numRows() > target && limit++ < 100) {
+        bool imp = false;
+        while(levels[levels.size() - 1].mtx.numRows() > target && (!imp || last_add < 5)) {
+            limit++;
             wg_t c = levels[levels.size() - 1];
             vtx_vt part("cluster assignments", c.mtx.numRows());
             Kokkos::parallel_for("set initial assignments", policy_t(0, c.mtx.numRows()), KOKKOS_LAMBDA(const ordinal_t x){
@@ -173,10 +245,7 @@ namespace clustering_methods {
             order::generate_orderings(mem, c.mtx);
             copy.copy(rfd);
             lm_t::local_move<constrained>(c, part, rfd, true, mem, constraint, true, upper_bound);
-            // the user clearly cares about quality if they are doing multiple iterations
-            // if(constrained && rfd.label_count == c.mtx.numRows()){
-            //     lm_t::local_move_strict<constrained>(c, part, rfd, true, mem, constraint);
-            // }
+            bool added = false;
             if(rfd.label_count < c.mtx.numRows()*0.9){
                 wg_t next_level = generate_next_level<false>(c, part, rfd.label_count, mem, rfd);
                 levels.push_back(next_level);
@@ -189,13 +258,17 @@ namespace clustering_methods {
                     downsample(constraint, next_constraint, part);
                     constraint = next_constraint;
                 }
-                grow_upper = true;
-            } else {
+                last_add = 0;
+                imp = true;
+                added = true;
+            }
+            if(!added) {
                 rfd.copy(copy);
-                if(grow_upper) {
+                if(imp) {
                     upper_bound = upper_bound * 2;
                     if(upper_bound > upper_bound_max) upper_bound = upper_bound_max;
                 }
+                last_add++;
             }
             rfd.lambda /= 1.5;
             rfd.update_objective();
