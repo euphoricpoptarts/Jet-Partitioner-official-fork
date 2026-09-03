@@ -165,4 +165,10 @@ struct memory_store {
         }
 
     memory_store(const memory_store&) = delete;
+
+    ~memory_store(){
+        cudaEventDestroy(e0);
+        cudaEventDestroy(e1);
+        cudaEventDestroy(e2);
+    }
 };
