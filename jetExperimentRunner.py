@@ -121,7 +121,7 @@ def runExperiment(executable, filepath, metricDir, logFile, config, l):
         call_str = " ".join(call)
         with rateLimit:
             print("running {}".format(call_str), flush=True)
-            stdout_f = "/var/tmp/sgpar_log.txt"
+            stdout_f = "tmp_log.txt"
             with open(stdout_f, 'w') as fp:
                 process = subprocess.Popen(call, stdout=fp, stderr=subprocess.DEVNULL)
             try:
@@ -155,16 +155,20 @@ def processGraph(filepath, metricDir, logFilePrefix):
     configs = [("tmp_config.txt", "i3louvain_lcalc", "7", "1"),
                ("tmp_config.txt", "i3leiden_calc", "11", "1"),
                ("tmp_config.txt", "i3match", "0", "1")]
-    for p in range(-3, 20):
+    for p in range(-3, 21):
         l = pow(2, p)
         config = ("tmp_config.txt", "i3louvain_mod_l{}".format(l), "4", str(l))
+        configs.append(config)
         config = ("tmp_config.txt", "i3leiden_mod_l{}".format(l), "8", str(l))
+        configs.append(config)
         config = ("tmp_config.txt", "i3louvain_nlcc_l{}".format(l), "5", str(l))
+        configs.append(config)
         config = ("tmp_config.txt", "i3leiden_nlcc_l{}".format(l), "9", str(l))
         configs.append(config)
     for li in range(1, 10):
             l = li / 10.0
             config = ("tmp_config.txt", "i3louvain_cpm_l{}".format(l), "6", str(l))
+            configs.append(config)
             config = ("tmp_config.txt", "i3leiden_cpm_l{}".format(l), "10", str(l))
             configs.append(config)
     call, name = callTuple
