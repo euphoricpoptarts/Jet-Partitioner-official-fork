@@ -578,7 +578,7 @@ vtx_vt rebalance_weak(const problem& prob, const part_vt& part, const conn_data&
         bid(i) = -1;
         if(p != best){
             gain_t gain = save_gains(i);
-            ordinal_t gain_type = gain_bucket(gain, vtx_w(i));
+            ordinal_t gain_type = gain_bucket(gain, Kokkos::min(vtx_w(i), part_sizes(p) - size_max));
             ordinal_t g_id = (max_buckets*p + gain_type) * sections + (i % sections);
             bid(i) = g_id;
             vscore(i) = Kokkos::atomic_fetch_add(&bucket_sizes(g_id), vtx_w(i));
