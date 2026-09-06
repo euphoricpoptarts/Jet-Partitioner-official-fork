@@ -154,7 +154,9 @@ def processGraph(filepath, metricDir, logFilePrefix):
     ks = [4, 16, 64]
     configs = [("tmp_config.txt", "i3louvain_lcalc", "7", "1"),
                ("tmp_config.txt", "i3leiden_calc", "11", "1"),
-               ("tmp_config.txt", "i3match", "0", "1")]
+               ("tmp_config.txt", "i3match", "0", "1"),
+               ("tmp_config.txt", "i3louvain_lp", "5", "0"),
+               ("tmp_config.txt", "i3leiden_lp", "9", "0")]
     for p in range(-3, 21):
         l = pow(2, p)
         config = ("tmp_config.txt", "i3louvain_mod_l{}".format(l), "4", str(l))
@@ -174,10 +176,10 @@ def processGraph(filepath, metricDir, logFilePrefix):
     call, name = callTuple
     for config, cname, alg, l in configs:
         for k in ks:
-            cname = f"k{k}{cname}"
+            kcname = f"k{k}{cname}"
             make_config(config, k, alg)
-            logFile = "{}_{}_{}_Sampling_Data.txt".format(logFilePrefix, name, cname)
-            print(cname)
+            logFile = "{}_{}_{}_Sampling_Data.txt".format(logFilePrefix, name, kcname)
+            print(kcname)
             runExperiment(call, filepath, metricDir, logFile, config, l)
 
     print("end {} processing".format(filepath), flush=True)
