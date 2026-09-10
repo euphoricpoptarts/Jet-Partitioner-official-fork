@@ -50,7 +50,7 @@ part_vt partition(value_t& edge_cut,
                 const wgt_vt vweights,
                 bool uniform_ew,
                 experiment_data<value_t>& experiment,
-                float lambda){
+                double lambda){
     
     return partitioner<matrix_t, part_t>::partition(edge_cut, config, g, vweights, uniform_ew, experiment, lambda);
 }

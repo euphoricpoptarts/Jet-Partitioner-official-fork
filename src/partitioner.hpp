@@ -85,7 +85,7 @@ enum class alg_choice {
 };
 
 enum class coarse_objective {
-    Modularity, NLCC, CPM, Calc_Mod
+    Modularity, NLCC, CPM, Calc_Mod, SLP
 };
 
 static double get_recommended(const wg_t c, double target) {
@@ -132,14 +132,19 @@ static std::unique_ptr<cluster_data> get_objective(wg_t& wg, const float lambda,
             wg.v_pen = wg.vtx_w;
             wg.reuse_w_as_pen = true;
             return std::make_unique<constant_potts>(wg, lambda);
+        case coarse_objective::SLP:
+            std::cout << "Using Size-Constrained Label Propagation" << std::endl;
+            wg.v_pen = wg.vtx_w;
+            wg.reuse_w_as_pen = true;
+            return std::make_unique<normalized_lcc>(wg, 0);
         case coarse_objective::Calc_Mod:
         default:
             std::cout << "Using Modularity with automatic gamma" << std::endl;
             wg.v_pen = degree_weighting(wg.mtx);
             wg.reuse_w_as_pen = false;
             std::unique_ptr<cluster_data> obj = std::make_unique<modularity>(wg, lambda);
-            obj->lambda = get_recommended(wg, 0.05);
-            obj->update_objective();
+            double rec = get_recommended(wg, 0.05);
+            obj->update_lambda(rec);
             return obj;
     }
 }
@@ -150,14 +155,14 @@ static part_vt partition(scalar_t& edge_cut,
                                   const wgt_vt vweights,
                                   bool uniform_ew,
                                   experiment_data<scalar_t>& experiment,
-                                  float lambda) {
+                                  double lambda) {
 
     coarsener_t coarsener;
     coarsener.set_heuristic(coarsener_t::MtMetis);
     part_t k = config.num_parts;
     ordinal_t opt = stat::optimal_size(g.numRows(), k);
     ordinal_t upper = opt*config.max_imb_ratio;
-    ordinal_t cluster_limit = upper / 8;
+    ordinal_t cluster_limit = upper;
     int cutoff = k*8;
     if(cutoff > 1024){
         cutoff = k*2;
@@ -166,8 +171,13 @@ static part_vt partition(scalar_t& edge_cut,
     coarsener.set_coarse_vtx_cutoff(cutoff);
     coarsener.set_min_allowed_vtx(cutoff / 4);
 
-    alg_choice c_alg = static_cast<alg_choice>(config.coarsening_alg / 4);
-    coarse_objective obj_type = static_cast<coarse_objective>(config.coarsening_alg % 4);
+    alg_choice c_alg = static_cast<alg_choice>(config.coarsening_alg / 5);
+    coarse_objective obj_type = static_cast<coarse_objective>(config.coarsening_alg % 5);
+    if(obj_type == coarse_objective::SLP){
+        cluster_limit = lambda;
+        if(cluster_limit < 2) cluster_limit = 2;
+        if(cluster_limit > upper) cluster_limit = upper;
+    }
 
     Kokkos::fence();
     Kokkos::Timer t;
@@ -178,7 +188,7 @@ static part_vt partition(scalar_t& edge_cut,
         wg_t top;
         top.mtx = g;
         top.vtx_w = vweights;
-        top.edge_uniform = true;
+        top.edge_uniform = uniform_ew;
         std::unique_ptr<cluster_data> rfd = get_objective(top, lambda, obj_type);
         mem_t mem(g, k, *rfd);
         vtx_vt dummy_constraint;
@@ -186,16 +196,16 @@ static part_vt partition(scalar_t& edge_cut,
         switch(c_alg){
             case alg_choice::Leiden:
                 std::cout << "Using Leiden" << std::endl;
-                cg_list = jet_community::clustering_methods::leiden_part<false, false>(mem, top, *rfd, dummy_constraint, upper, upper, cutoff);
+                cg_list = jet_community::clustering_methods::leiden_part<false, false>(mem, top, *rfd, dummy_constraint, cluster_limit, upper, cutoff);
                 break;
             case alg_choice::Louvain:
                 std::cout << "Using Louvain" << std::endl;
-                cg_list = jet_community::clustering_methods::louvain_part<false>(mem, top, *rfd, dummy_constraint, upper, upper, cutoff);
+                cg_list = jet_community::clustering_methods::louvain_part<false>(mem, top, *rfd, dummy_constraint, cluster_limit, upper, cutoff);
                 break;
             case alg_choice::Match:
             default:
                 std::cout << "Using Two-hop Matching" << std::endl;
-                cg_list = coarsener.template generate_coarse_graphs<false>(top.mtx, top.vtx_w, mem, experiment, upper, dummy_constraint, true);
+                cg_list = coarsener.template generate_coarse_graphs<false>(top.mtx, top.vtx_w, mem, experiment, upper, dummy_constraint, top.edge_uniform);
                 break;
         }
         Kokkos::fence();

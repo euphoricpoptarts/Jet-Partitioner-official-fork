@@ -49,7 +49,7 @@ part_vt partition(value_t& edge_cut,
                 const wgt_vt vweights,
                 bool uniform_ew,
                 experiment_data<value_t>& experiment,
-                float lambda);
+                double lambda);
 
 // part_mt partition_host(value_t& edge_cut,
 //                 const config_t& config,

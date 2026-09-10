@@ -73,7 +73,7 @@ int main(int argc, char **argv) {
     config_t config;
     char *filename = argv[1];
     if(!load_config(config, argv[2])) return -1;
-    float lambda = atof(argv[3]);
+    double lambda = atof(argv[3]);
     char *part_file = nullptr;
     char *metrics = nullptr;
     if(argc >= 5){

@@ -205,16 +205,15 @@ namespace clustering_methods {
                 added = true;
             }
             if(!added) {
-                if(imp){
-                    upper_bound = upper_bound * 2;
-                    if(upper_bound > upper_bound_max) upper_bound = upper_bound_max;
-                }
                 rfd.copy(copy);
                 Kokkos::deep_copy(part, pcopy);
                 last_add++;
             }
-            rfd.lambda /= 1.5;
-            rfd.update_objective();
+            if(imp){
+                upper_bound = upper_bound * 2;
+                if(upper_bound > upper_bound_max) upper_bound = upper_bound_max;
+            }
+            rfd.update_lambda(rfd.lambda / 1.5);
         }
         std::cout << "Iterations since last added level: " << last_add << std::endl;
         std::cout << "Total iterations: " << limit << std::endl;
@@ -264,14 +263,13 @@ namespace clustering_methods {
             }
             if(!added) {
                 rfd.copy(copy);
-                if(imp) {
-                    upper_bound = upper_bound * 2;
-                    if(upper_bound > upper_bound_max) upper_bound = upper_bound_max;
-                }
                 last_add++;
             }
-            rfd.lambda /= 1.5;
-            rfd.update_objective();
+            if(imp) {
+                upper_bound = upper_bound * 2;
+                if(upper_bound > upper_bound_max) upper_bound = upper_bound_max;
+            }
+            rfd.update_lambda(rfd.lambda / 1.5);
         }
         
         return output;

@@ -24,6 +24,7 @@ struct cluster_data {
     edge_offset_t top_nnz = 0;
     double obj = -1.0;
     ordinal_t label_count;
+    int64_t save_square_sum = 0;
 
     // metadata needed between local move iterations
     edge_offset_t last_pval = 0;
@@ -79,6 +80,7 @@ struct cluster_data {
         obj = rhs.obj;
         label_count = rhs.label_count;
         lambda = rhs.lambda;
+        save_square_sum = rhs.save_square_sum;
     }
 
     cluster_data(const cluster_data& rhs){
@@ -100,8 +102,17 @@ struct cluster_data {
             int64_t c_size = total(l);
             update += c_size*c_size;
         }, square_sum);
+        save_square_sum = square_sum;
         double m = uncut;
         m -= lambda * static_cast<double>(square_sum);
+        obj = m;
+    }
+
+    // also updates objective
+    void update_lambda(double _lambda){
+        lambda = _lambda;
+        double m = uncut;
+        m -= lambda * static_cast<double>(save_square_sum);
         obj = m;
     }
 
@@ -138,8 +149,8 @@ struct modularity : public cluster_data {
         if(wg.edge_uniform) g_deg = wg.mtx.nnz();
         else g_deg = cluster_data::sum(wg.v_pen);
         inv_gdeg = 1.0 / static_cast<double>(g_deg);
-        cluster_data::lambda = _penalty_scale * inv_gdeg;
-        cluster_data::update_objective();
+        double new_lambda = _penalty_scale * inv_gdeg;
+        cluster_data::update_lambda(new_lambda);
     }
 
     virtual double get_objective() const override {
@@ -162,8 +173,7 @@ struct constant_potts : public cluster_data {
 
     constant_potts(const wg_t wg, double _penalty_scale) : cluster_data(wg, 1.0) {
         v_total = wg.mtx.numRows();
-        cluster_data::lambda = _penalty_scale;
-        cluster_data::update_objective();
+        cluster_data::update_lambda(_penalty_scale);
     }
 
     virtual double get_objective() const override {
@@ -189,8 +199,8 @@ struct normalized_lcc : public cluster_data {
         else g_deg = cluster_data::sum(wg.mtx.values);
         uint64_t v_total = cluster_data::sum(wg.v_pen);
         double denom = static_cast<double>(v_total * v_total);
-        cluster_data::lambda = _penalty_scale * static_cast<double>(g_deg) / denom;
-        cluster_data::update_objective();
+        double new_lambda = _penalty_scale * static_cast<double>(g_deg) / denom;
+        cluster_data::update_lambda(new_lambda);
     }
 
     virtual double get_objective() const override {
