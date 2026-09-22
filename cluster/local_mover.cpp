@@ -713,11 +713,14 @@ vtx_vt fix_oversized(const wg_t& wg, const vtx_vt part, mem_t& mem, refine_data&
         return only_moves;
     }
     ordinal_t sections = max_sections;
-    ordinal_t t_minibuckets = max_buckets*total_oversized*sections;
-    if(t_minibuckets > n) {
+    // need to avoid integer overflow in calculating t_minibuckets in case it would exceed n by a lot
+    if(total_oversized > n / (max_buckets*sections)) {
         sections = n / (max_buckets*total_oversized);
         if(sections == 0) sections = 1;
-        t_minibuckets = max_buckets*total_oversized*sections;
+    }
+    ordinal_t t_minibuckets = max_buckets*total_oversized*sections;
+    if(t_minibuckets > mem.s_mem.gain1.extent(0)){
+        mem.s_mem.gain1 = wgt_vt(Kokkos::ViewAllocateWithoutInitializing("gain1 extra"), t_minibuckets);
     }
     wgt_vt pvals = mem.p_mem.pvals;
     wgt_vt bucket_offsets = Kokkos::subview(mem.s_mem.gain1, std::make_pair(static_cast<ordinal_t>(0), t_minibuckets));
@@ -734,16 +737,26 @@ vtx_vt fix_oversized(const wg_t& wg, const vtx_vt part, mem_t& mem, refine_data&
         bid(i) = g_id;
         vscore(i) = Kokkos::atomic_fetch_add(&bucket_offsets(g_id), vtx_w(i));
     });
-    Kokkos::parallel_for("scan score buckets", team_policy_t(1, 1024), KOKKOS_LAMBDA(const member& t){
-        //this scan is small so do it within a team instead of an entire grid to save kernel launch time
-        Kokkos::parallel_scan(Kokkos::TeamThreadRange(t, 0, t_minibuckets), [&] (const ordinal_t i, scalar_t& update, const bool final) {
+    if(t_minibuckets < 1024) {
+        Kokkos::parallel_for("scan score buckets", team_policy_t(1, 1024), KOKKOS_LAMBDA(const member& t){
+            //this scan is small so do it within a team instead of an entire grid to save kernel launch time
+            Kokkos::parallel_scan(Kokkos::TeamThreadRange(t, 0, t_minibuckets), [&] (const ordinal_t i, scalar_t& update, const bool final) {
+                scalar_t x = bucket_offsets(i);
+                if(final){
+                    bucket_offsets(i) = update;
+                }
+                update += x;
+            });
+        });
+    } else {
+        Kokkos::parallel_scan("scan score buckets", policy_t(0, t_minibuckets), KOKKOS_LAMBDA(const ordinal_t i, scalar_t& update, const bool final){
             scalar_t x = bucket_offsets(i);
             if(final){
                 bucket_offsets(i) = update;
             }
             update += x;
         });
-    });
+    }
     ordinal_t width = max_buckets*sections;
     ordinal_t num_moves = 0;
     vtx_pin_st pin_host = mem.s_mem.pin_host;

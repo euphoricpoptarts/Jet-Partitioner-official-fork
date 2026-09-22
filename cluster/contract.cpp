@@ -161,12 +161,12 @@ struct combineAndDedupe {
 
     // uses linear probing to resolve hash conflicts
     KOKKOS_INLINE_FUNCTION
-        edge_offset_t insert(const edge_offset_t& hash_start, const edge_offset_t& size, const ordinal_t& u, const ordinal_t& i) const {
+        edge_offset_t insert(const edge_offset_t& hash_start, const edge_offset_t& size, const ordinal_t& u, const ordinal_t& i, ordinal_t& added) const {
             edge_offset_t offset = xorshiftHash(u) % static_cast<uint32_t>(size);
             while(true){
                 if(htable(hash_start + offset) == HASH_NULL){
                     if(Kokkos::atomic_compare_exchange(&htable(hash_start + offset), HASH_NULL, u) == HASH_NULL){
-                        Kokkos::atomic_add(&counts(i), 1);
+                        added++;
                     }
                 }
                 if(htable(hash_start + offset) == u){
@@ -187,12 +187,16 @@ struct combineAndDedupe {
         const edge_offset_t end = g.graph.row_map(x + 1);
         const edge_offset_t hash_start = hrow_map(i);
         const edge_offset_t size = hrow_map(i + 1) - hash_start;
-        Kokkos::parallel_for(Kokkos::TeamThreadRange(thread, start, end), [&](const edge_offset_t j){
+        ordinal_t added = 0;
+        Kokkos::parallel_reduce(Kokkos::TeamThreadRange(thread, start, end), [&](const edge_offset_t j, ordinal_t& update){
             ordinal_t u = vcmap(g.graph.entries(j));
             if(i == u) return;
-            edge_offset_t offset = insert(hash_start, size, u, i);
+            edge_offset_t offset = insert(hash_start, size, u, i, update);
             if constexpr(uniform) Kokkos::atomic_add(&hvals(hash_start + offset), 1);
             else Kokkos::atomic_add(&hvals(hash_start + offset), g.values(j));
+        }, added);
+        Kokkos::single(Kokkos::PerTeam(thread), [&] () {
+            Kokkos::atomic_add(&counts(i), added);
         });
     }
 
@@ -205,13 +209,15 @@ struct combineAndDedupe {
         const edge_offset_t end = g.graph.row_map(x + 1);
         const edge_offset_t hash_start = hrow_map(i);
         const edge_offset_t size = hrow_map(i + 1) - hash_start;
+        ordinal_t added = 0;
         for(edge_offset_t j = start; j < end; j++){
             ordinal_t u = vcmap(g.graph.entries(j));
             if(i == u) continue;
-            edge_offset_t offset = insert(hash_start, size, u, i);
+            edge_offset_t offset = insert(hash_start, size, u, i, added);
             if constexpr(uniform) Kokkos::atomic_add(&hvals(hash_start + offset), 1);
             else Kokkos::atomic_add(&hvals(hash_start + offset), g.values(j));
         }
+        Kokkos::atomic_add(&counts(i), added);
     }
 };
 
@@ -240,7 +246,7 @@ wg_t build_coarse_graph(const wg_t curr_level,
 
     matrix_t g = curr_level.mtx;
     ordinal_t n = g.numRows();
-    double multiplier = 1.0;
+    double multiplier = 1.2;
     if(nc > n * 0.5) multiplier = 1.5;
     if(g.nnz() * multiplier > mem.p_mem.entries.extent(0)){
         // rare edge-case

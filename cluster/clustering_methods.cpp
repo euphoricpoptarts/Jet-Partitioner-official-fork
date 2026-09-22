@@ -209,7 +209,7 @@ namespace clustering_methods {
                 Kokkos::deep_copy(part, pcopy);
                 last_add++;
             }
-            if(imp){
+            if(imp || rfd.lambda == 0){
                 upper_bound = upper_bound * 2;
                 if(upper_bound > upper_bound_max) upper_bound = upper_bound_max;
             }
@@ -265,7 +265,7 @@ namespace clustering_methods {
                 rfd.copy(copy);
                 last_add++;
             }
-            if(imp) {
+            if(imp || rfd.lambda == 0) {
                 upper_bound = upper_bound * 2;
                 if(upper_bound > upper_bound_max) upper_bound = upper_bound_max;
             }
