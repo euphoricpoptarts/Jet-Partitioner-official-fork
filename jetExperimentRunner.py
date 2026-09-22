@@ -152,27 +152,33 @@ def make_config(fname, k, alg):
 def processGraph(filepath, metricDir, logFilePrefix):
 
     ks = [4, 16, 64]
-    configs = [("tmp_config.txt", "i3louvain_lcalc", "7", "1"),
-               ("tmp_config.txt", "i3leiden_calc", "11", "1"),
+    configs = [("tmp_config.txt", "i3louvain_lcalc", "8", "1"),
+               ("tmp_config.txt", "i3leiden_calc", "13", "1"),
                ("tmp_config.txt", "i3match", "0", "1"),
-               ("tmp_config.txt", "i3louvain_lp", "5", "0"),
-               ("tmp_config.txt", "i3leiden_lp", "9", "0")]
-    for p in range(-3, 21):
+               ("tmp_config.txt", "i3louvain_lp", "9", "0"),
+               ("tmp_config.txt", "i3leiden_lp", "14", "0")]
+    for p in range(1, 18):
         l = pow(2, p)
-        config = ("tmp_config.txt", "i3louvain_mod_l{}".format(l), "4", str(l))
+        config = ("tmp_config.txt", "i3louvain_lp_limit_retry_{}".format(l), "9", str(l))
         configs.append(config)
-        config = ("tmp_config.txt", "i3leiden_mod_l{}".format(l), "8", str(l))
+        config = ("tmp_config.txt", "i3leiden_lp_limit_retry_{}".format(l), "14", str(l))
         configs.append(config)
-        config = ("tmp_config.txt", "i3louvain_nlcc_l{}".format(l), "5", str(l))
-        configs.append(config)
-        config = ("tmp_config.txt", "i3leiden_nlcc_l{}".format(l), "9", str(l))
-        configs.append(config)
-    for li in range(1, 10):
-            l = li / 10.0
-            config = ("tmp_config.txt", "i3louvain_cpm_l{}".format(l), "6", str(l))
-            configs.append(config)
-            config = ("tmp_config.txt", "i3leiden_cpm_l{}".format(l), "10", str(l))
-            configs.append(config)
+    # for p in range(-3, 21):
+    #     l = pow(2, p)
+    #     config = ("tmp_config.txt", "i3louvain_mod_l{}".format(l), "5", str(l))
+    #     configs.append(config)
+    #     config = ("tmp_config.txt", "i3leiden_mod_l{}".format(l), "10", str(l))
+    #     configs.append(config)
+    #     config = ("tmp_config.txt", "i3louvain_nlcc_l{}".format(l), "6", str(l))
+    #     configs.append(config)
+    #     config = ("tmp_config.txt", "i3leiden_nlcc_l{}".format(l), "11", str(l))
+    #     configs.append(config)
+    # for li in range(1, 10):
+    #         l = li / 10.0
+    #         config = ("tmp_config.txt", "i3louvain_cpm_l{}".format(l), "7", str(l))
+    #         configs.append(config)
+    #         config = ("tmp_config.txt", "i3leiden_cpm_l{}".format(l), "12", str(l))
+    #         configs.append(config)
     call, name = callTuple
     for config, cname, alg, l in configs:
         for k in ks:
